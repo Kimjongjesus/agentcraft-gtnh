@@ -86,10 +86,10 @@ def init(root: Path) -> None:
         b.comment("t_hq", "claude-builder", line, at=now - 600 + i * 120)
     b.event("t_hq", "heartbeat", {"note": "status lamps and fleet beacon wired"}, run_id=rid, at=now - 30)
     # Sonnet Builder at a shared desk
-    b.task("t_samops", "Game project: level polish", "running", "claude-builder-sonnet", priority=60)
-    rid = b.run("t_samops", "claude-builder-sonnet", started=now - 1200, hb=now)
-    b.event("t_samops", "claimed", {"run_id": rid}, run_id=rid, at=now - 1200)
-    b.comment("t_samops", "claude-builder-sonnet", "PROGRESS: tuning air-strafe on ramp 3", at=now - 60)
+    b.task("t_game", "Game project: level polish", "running", "claude-builder-sonnet", priority=60)
+    rid = b.run("t_game", "claude-builder-sonnet", started=now - 1200, hb=now)
+    b.event("t_game", "claimed", {"run_id": rid}, run_id=rid, at=now - 1200)
+    b.comment("t_game", "claude-builder-sonnet", "PROGRESS: tuning movement on level 3", at=now - 60)
     # Sol Reviewer in the library
     b.task("t_review", "Review: nightly backup script", "running", "sol-reviewer", priority=50)
     rid = b.run("t_review", "sol-reviewer", started=now - 400, hb=now)
@@ -119,7 +119,7 @@ def _card3_board(home: Path, b: BoardFixture, now: int) -> None:
            body="Write a short guide: where to put the task wall, library and atrium, and how to bind them.")
     b.task("t_saves", "Game project: save-file migration", "todo", None, priority=20,
            body="Migrate old save files to the new format. Needs the level polish card first.")
-    b.link("t_samops", "t_saves")
+    b.link("t_game", "t_saves")
     b.task("t_copy", "Website: landing page copy", "triage", "luna-reviewer", priority=10)
     # review
     b.task("t_inv", "Game project: inventory UI pass", "review", "claude-builder-sonnet", priority=55,
@@ -158,11 +158,11 @@ def wall_move(root: Path) -> None:
     """Card 3: cards move between columns (wall/atrium update within seconds) and a new plan note."""
     b = board(root)
     t = int(time.time())
-    rid = run_id(b, "t_samops")
+    rid = run_id(b, "t_game")
     b.sql("UPDATE task_runs SET status='done', ended_at=?, outcome='review_requested', summary=? WHERE id=?",
           (t, "Level 3 polish: ramps smoothed, two new checkpoints.", rid))
-    b.sql("UPDATE tasks SET status='review' WHERE id='t_samops'")
-    b.event("t_samops", "review_requested", {"summary": "level polish ready"}, run_id=rid, at=t)
+    b.sql("UPDATE tasks SET status='review' WHERE id='t_game'")
+    b.event("t_game", "review_requested", {"summary": "level polish ready"}, run_id=rid, at=t)
     b.sql("UPDATE tasks SET status='running' WHERE id='t_guide'")
     rid = b.run("t_guide", "astra-ultimate", started=t, hb=t)
     b.event("t_guide", "claimed", {"run_id": rid}, run_id=rid, at=t)
@@ -206,12 +206,12 @@ def unblock(root: Path) -> None:
 def crash(root: Path) -> None:
     b = board(root)
     t = int(time.time())
-    for task in ("t_hq", "t_samops", "t_review", "t_perm"):
+    for task in ("t_hq", "t_game", "t_review", "t_perm"):
         rid = run_id(b, task)
-        outcome = "crashed" if task == "t_samops" else "completed"
+        outcome = "crashed" if task == "t_game" else "completed"
         b.sql("UPDATE task_runs SET status='done', ended_at=?, outcome=? WHERE id=?", (t - 400, outcome, rid))
-        b.sql("UPDATE tasks SET status=? WHERE id=?", ("ready" if task == "t_samops" else "done", task))
-    b.event("t_samops", "crashed", None, run_id=run_id(b, "t_samops"), at=t - 400)
+        b.sql("UPDATE tasks SET status=? WHERE id=?", ("ready" if task == "t_game" else "done", task))
+    b.event("t_game", "crashed", None, run_id=run_id(b, "t_game"), at=t - 400)
     log("crash: Sonnet's run crashed; everyone else finished")
 
 

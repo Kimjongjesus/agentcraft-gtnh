@@ -29,7 +29,7 @@ mark "A: initial board: wall, atriums, library label, screens"
 shot cam_wall 20-taskwall
 shot cam_atrium 21-atrium
 shot cam_library 22-library-block
-gui taskwall - t_samops 23-taskwall-screen
+gui taskwall - t_game 23-taskwall-screen
 gui taskwall homelab t_music 24-taskwall-blocked-detail
 gui library - plan-t_inv 25-library-plan
 gui library - handoff-t_old 26-library-handoff
