@@ -53,6 +53,12 @@ public class ClientProxy extends CommonProxy {
         ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.Atrium.class, tiles);
         ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.Library.class, tiles);
         MinecraftForge.EVENT_BUS.register(new AnchorOverlayRenderer());
+        // card 6: edit-mode overlay (anchor markers, panel outline, crosshair card)
+        dev.agentcraft.gtnh.client.edit.EditOverlay overlay = new dev.agentcraft.gtnh.client.edit.EditOverlay();
+        MinecraftForge.EVENT_BUS.register(overlay);
+        FMLCommonHandler.instance()
+            .bus()
+            .register(overlay);
         FMLCommonHandler.instance()
             .bus()
             .register(new Disconnect());
@@ -65,12 +71,68 @@ public class ClientProxy extends CommonProxy {
             .displayGuiScreen(kind == BlockAgentCraft.Kind.LIBRARY ? new GuiLibrary(binding, "") : new GuiTaskWall(binding, null));
     }
 
+    @Override
+    public void editToolUse(int[] hit, net.minecraft.entity.player.EntityPlayer player, boolean editMode) {
+        Minecraft mc = Minecraft.getMinecraft();
+        if (!editMode) {
+            player.addChatMessage(new net.minecraft.util.ChatComponentText("[AgentCraft] sneak + right-click to switch edit mode on"));
+            return;
+        }
+        int[] mv = dev.agentcraft.gtnh.client.edit.ClientEdit.moving;
+        if (mv != null) {
+            moveTo(mv, hit, player);
+            return;
+        }
+        String an = dev.agentcraft.gtnh.client.edit.ClientEdit.targetAnchor;
+        if (an != null) {
+            mc.displayGuiScreen(new dev.agentcraft.gtnh.client.edit.GuiEditor(dev.agentcraft.gtnh.client.edit.GuiEditor.ANCHORS, an, null, null));
+            return;
+        }
+        int[] sign = hit != null && mc.theWorld.getTileEntity(hit[0], hit[1], hit[2]) instanceof net.minecraft.tileentity.TileEntitySign ? hit : null;
+        mc.displayGuiScreen(new dev.agentcraft.gtnh.client.edit.GuiEditor(dev.agentcraft.gtnh.client.edit.GuiEditor.PALETTE, null, sign, null));
+    }
+
+    /** Move mode: the clicked face's neighbour cell, front turned towards the player. */
+    private static void moveTo(int[] from, int[] hit, net.minecraft.entity.player.EntityPlayer player) {
+        dev.agentcraft.gtnh.client.edit.ClientEdit.moving = null;
+        if (hit == null) {
+            player.addChatMessage(new net.minecraft.util.ChatComponentText("[AgentCraft] move cancelled"));
+            return;
+        }
+        int x = hit[0], y = hit[1], z = hit[2];
+        switch (hit[3]) {
+            case 0: y--; break;
+            case 1: y++; break;
+            case 2: z--; break;
+            case 3: z++; break;
+            case 4: x--; break;
+            case 5: x++; break;
+            default:
+        }
+        int q = net.minecraft.util.MathHelper.floor_double(player.rotationYaw * 4.0F / 360.0F + 0.5D) & 3; // player faces 0 S, 1 W, 2 N, 3 E
+        String facing = q == 0 ? "north" : q == 1 ? "east" : q == 2 ? "south" : "west";
+        dev.agentcraft.gtnh.client.edit.ClientEdit.send("a", "panel.move", "pos", from[0] + "," + from[1] + "," + from[2], "to", x + "," + y + "," + z, "facing", facing);
+    }
+
+    @Override
+    public void openInspector(int x, int y, int z) {
+        Minecraft mc = Minecraft.getMinecraft();
+        int[] mv = dev.agentcraft.gtnh.client.edit.ClientEdit.moving;
+        if (mv != null && mc.objectMouseOver != null) {
+            moveTo(mv, new int[] { x, y, z, mc.objectMouseOver.sideHit }, mc.thePlayer);
+            return;
+        }
+        mc.displayGuiScreen(new dev.agentcraft.gtnh.client.edit.GuiPanelInspector(x, y, z));
+    }
+
     /** Card 3: drop the task wall / library data of a server the player left. */
     public static final class Disconnect {
 
         @SubscribeEvent
         public void onDisconnect(FMLNetworkEvent.ClientDisconnectionFromServerEvent e) {
             ClientHq.reset();
+            dev.agentcraft.gtnh.client.edit.ClientEdit.reset();
+            dev.agentcraft.gtnh.ui.panel.PanelLayout.serverDisplay("{}");
         }
     }
 }

@@ -21,7 +21,9 @@ import io.netty.buffer.ByteBuf;
 /**
  * Server -> client replication over a SimpleNetworkWrapper channel. Nothing flows client -> server.
  * AgentSync: every agent (replace semantics) + fleet summary; LogSync: one agent's monitor tail,
- * sent only when it changed; AnchorOverlay: anchors for the op debug overlay.
+ * sent only when it changed; AnchorOverlay: anchors for the op debug overlay. Card 6 adds the one
+ * client -> server message, {@link EditCmd} (an edit-tool request, JSON, re-validated by the server:
+ * op level, lock, rate limit, the layout engine's safety rules), and its answer {@link EditView}.
  */
 public final class Net {
 
@@ -42,6 +44,10 @@ public final class Net {
         CHANNEL.registerMessage(LogSyncHandler.class, LogSync.class, 1, Side.CLIENT);
         CHANNEL.registerMessage(AnchorOverlayHandler.class, AnchorOverlay.class, 2, Side.CLIENT);
         CHANNEL.registerMessage(BlobHandler.class, Blob.class, 3, Side.CLIENT);
+        // card 6 (office edit tool): the only client -> server message; the server re-checks everything
+        CHANNEL.registerMessage(EditCmdHandler.class, EditCmd.class, 4, Side.SERVER);
+        CHANNEL.registerMessage(EditViewHandler.class, EditView.class, 5, Side.CLIENT);
+        CHANNEL.registerMessage(DisplayHandler.class, Display.class, 6, Side.CLIENT);
     }
 
     public static void sendTo(IMessage msg, EntityPlayerMP player) {
@@ -286,6 +292,119 @@ public final class Net {
         @Override
         public IMessage onMessage(Blob msg, MessageContext ctx) {
             dev.agentcraft.gtnh.state.ClientHq.acceptPart(msg.kind, msg.gen, msg.index, msg.count, msg.data);
+            return null;
+        }
+    }
+
+    // ---- card 6: edit tool ------------------------------------------------------------------
+
+    public static final int MAX_CMD = 8000, MAX_VIEW = 30000;
+
+    static String readText(ByteBuf buf, int max) {
+        int n = buf.readInt();
+        if (n < 0 || n > max || n > buf.readableBytes()) throw new IllegalArgumentException("text too long");
+        byte[] b = new byte[n];
+        buf.readBytes(b);
+        return new String(b, java.nio.charset.StandardCharsets.UTF_8);
+    }
+
+    static void writeText(ByteBuf buf, String s, int max) {
+        byte[] b = s.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        if (b.length > max) b = "{}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        buf.writeInt(b.length);
+        buf.writeBytes(b);
+    }
+
+    /** Client -> server: one edit-tool request as JSON ({"a": action, ...}). */
+    public static final class EditCmd implements IMessage {
+
+        public String json = "{}";
+
+        public EditCmd() {}
+
+        public EditCmd(String json) {
+            this.json = json;
+        }
+
+        @Override
+        public void fromBytes(ByteBuf buf) {
+            json = readText(buf, MAX_CMD);
+        }
+
+        @Override
+        public void toBytes(ByteBuf buf) {
+            writeText(buf, json, MAX_CMD);
+        }
+    }
+
+    public static final class EditCmdHandler implements IMessageHandler<EditCmd, IMessage> {
+
+        @Override
+        public IMessage onMessage(EditCmd msg, MessageContext ctx) {
+            // netty thread: only queue it; the server tick handles it (EditService)
+            dev.agentcraft.gtnh.server.EditService.enqueue(ctx.getServerHandler().playerEntity, msg.json);
+            return null;
+        }
+    }
+
+    /** Server -> client: the editor view (lock, undo/redo, anchors, snapshots, presets, last result). */
+    public static final class EditView implements IMessage {
+
+        public String json = "{}";
+
+        public EditView() {}
+
+        public EditView(String json) {
+            this.json = json;
+        }
+
+        @Override
+        public void fromBytes(ByteBuf buf) {
+            json = readText(buf, MAX_VIEW);
+        }
+
+        @Override
+        public void toBytes(ByteBuf buf) {
+            writeText(buf, json, MAX_VIEW);
+        }
+    }
+
+    public static final class EditViewHandler implements IMessageHandler<EditView, IMessage> {
+
+        @Override
+        public IMessage onMessage(EditView msg, MessageContext ctx) {
+            dev.agentcraft.gtnh.client.edit.ClientEdit.acceptView(msg.json);
+            return null;
+        }
+    }
+
+    /** Server -> every client: layout display options (theme, labels, detail thresholds). */
+    public static final class Display implements IMessage {
+
+        public String json = "{}";
+
+        public Display() {}
+
+        public Display(String json) {
+            this.json = json;
+        }
+
+        @Override
+        public void fromBytes(ByteBuf buf) {
+            json = readText(buf, 2000);
+        }
+
+        @Override
+        public void toBytes(ByteBuf buf) {
+            writeText(buf, json, 2000);
+        }
+    }
+
+    public static final class DisplayHandler implements IMessageHandler<Display, IMessage> {
+
+        @Override
+        public IMessage onMessage(Display msg, MessageContext ctx) {
+            dev.agentcraft.gtnh.ui.panel.PanelLayout.serverDisplay(msg.json);
             return null;
         }
     }

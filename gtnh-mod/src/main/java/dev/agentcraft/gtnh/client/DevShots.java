@@ -31,8 +31,12 @@ public final class DevShots {
 
     private static final Pattern SHOT = Pattern.compile("devshot ([A-Za-z0-9_-]{1,40})");
     /** devgui taskwall|library|close [binding|-] [select]: open a card-3 screen for a screenshot. */
-    private static final Pattern GUI = Pattern.compile("devgui (taskwall|library|close)(?: (\\S+))?(?: (\\S+))?");
+    private static final Pattern GUI = Pattern.compile("devgui (taskwall|library|editor|inspector|close)(?: (\\S+))?(?: (\\S+))?");
     private volatile String[] pendingGui;
+    /** card 6: devact ACTION k=v ... sends an edit-tool request as this player; devhud on|off shows the HUD in shots. */
+    private static final Pattern ACT = Pattern.compile("devact (\\S+)((?: [A-Za-z]+=\\S+)*)");
+    private static final Pattern HUD = Pattern.compile("devhud (on|off)");
+    private volatile boolean showHud;
 
     private final String connect = System.getProperty("agentcraft.dev.connect", "");
     private final boolean onChat = System.getProperty("agentcraft.dev.shotOnChat") != null;
@@ -72,6 +76,36 @@ public final class DevShots {
         String text = e.message.getUnformattedText();
         Matcher m = SHOT.matcher(text);
         Matcher g = GUI.matcher(text);
+        Matcher act = ACT.matcher(text);
+        Matcher hud = HUD.matcher(text);
+        if (text.contains("devshot ") || text.contains("devgui ") || text.contains("devact ") || text.contains("devhud ")) e.setCanceled(true); // keep QA control lines out of the shots
+        if (act.find() && text.startsWith("[Server] ")) { // dev client only, and only from the console's say, never a player's chat line
+            java.util.List<Object> kv = new java.util.ArrayList<>();
+            kv.add("a");
+            kv.add(act.group(1));
+            for (String pair : act.group(2)
+                .trim()
+                .split(" ")) {
+                int eq = pair.indexOf('=');
+                if (eq > 0) {
+                    kv.add(pair.substring(0, eq));
+                    kv.add(pair.substring(eq + 1));
+                }
+            }
+            if ("applylast".equals(act.group(1))) {
+                java.util.Map<String, Object> r = dev.agentcraft.gtnh.client.edit.ClientEdit.result;
+                java.util.Map<String, Object> plan = r == null ? null : dev.agentcraft.gtnh.edit.Json.obj(r, "plan");
+                if (plan != null) dev.agentcraft.gtnh.client.edit.ClientEdit.send("a", "plan.apply", "token", dev.agentcraft.gtnh.edit.Json.str(plan, "token", ""));
+            } else {
+                dev.agentcraft.gtnh.client.edit.ClientEdit.send(kv.toArray());
+            }
+            AgentCraftGTNH.LOG.info("DevShots: devact {}", act.group(0));
+            return;
+        }
+        if (hud.find()) {
+            showHud = "on".equals(hud.group(1));
+            return;
+        }
         if (m.find()) {
             pendingShot = m.group(1);
             pendingDelay = 40;
@@ -106,12 +140,26 @@ public final class DevShots {
         }
         ticksInWorld++;
         if (onChat) {
-            mc.gameSettings.hideGUI = true;
+            mc.gameSettings.hideGUI = !showHud;
             String[] gui = pendingGui;
             if (gui != null) {
                 pendingGui = null;
                 if ("close".equals(gui[0])) {
                     mc.displayGuiScreen(null);
+                } else if ("editor".equals(gui[0])) {
+                    // card 6: devgui editor palette|anchors|layouts [anchor name | action like diff:NAME]
+                    int tab = "anchors".equals(gui[1]) ? 1 : "layouts".equals(gui[1]) ? 2 : 0;
+                    String arg = gui[2].isEmpty() ? null : gui[2];
+                    mc.displayGuiScreen(new dev.agentcraft.gtnh.client.edit.GuiEditor(tab, tab == 1 ? arg : null, null, tab == 2 ? arg : null));
+                } else if ("inspector".equals(gui[0])) {
+                    // card 6: devgui inspector x,y,z [binding:w:h]
+                    String[] p = gui[1].split(",");
+                    dev.agentcraft.gtnh.client.edit.GuiPanelInspector gi = new dev.agentcraft.gtnh.client.edit.GuiPanelInspector(
+                        Integer.parseInt(p[0]),
+                        Integer.parseInt(p[1]),
+                        Integer.parseInt(p[2]));
+                    mc.displayGuiScreen(gi);
+                    if (!gui[2].isEmpty()) gi.devPreset(gui[2]);
                 } else if ("library".equals(gui[0])) {
                     // select "q=<word>": open with that search text instead of selecting a note
                     boolean q = gui[2].startsWith("q=");

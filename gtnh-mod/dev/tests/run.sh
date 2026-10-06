@@ -10,7 +10,8 @@ mkdir -p "$OUT"
 "${BIN}javac" --release 8 -Xlint:-options -d "$OUT" \
   "$SRC/hq/Anchor.java" "$SRC/hq/StationAssigner.java" \
   "$SRC/ui/Theme.java" "$SRC/ui/TextLayout.java" "$SRC/ui/PlateDeclutter.java" \
-  dev/tests/StationAssignerCheck.java dev/tests/UiPureCheck.java dev/tests/PlateLayoutCheck.java
-for c in StationAssignerCheck UiPureCheck PlateLayoutCheck; do
+  "$SRC"/edit/*.java \
+  dev/tests/StationAssignerCheck.java dev/tests/UiPureCheck.java dev/tests/PlateLayoutCheck.java dev/tests/EditCheck.java
+for c in StationAssignerCheck UiPureCheck PlateLayoutCheck EditCheck; do
   "${BIN}java" -ea -cp "$OUT" "$c"
 done

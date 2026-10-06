@@ -33,7 +33,7 @@ public final class InWorldPanels {
 
     static int lod(TileAgentCraft t, double ppb) {
         Integer prev = LAST_LOD.get(t);
-        double near = PanelLayout.nearPx, mid = PanelLayout.midPx;
+        double near = PanelLayout.near(), mid = PanelLayout.mid();
         int l;
         if (prev == null) {
             l = ppb >= near ? PanelContext.NEAR : ppb >= mid ? PanelContext.MID : PanelContext.FAR;
@@ -61,20 +61,31 @@ public final class InWorldPanels {
         PanelRenderer r = PanelRegistry.get(e.panel);
         if (r == null) return;
         double ppb = screenPxPerBlock(distance);
-        Theme th = Theme.byId(e.theme);
+        // card 6: per-panel theme (edit tool) > the server layout's theme > this client's layout file
+        String themeId = !t.theme.isEmpty() ? t.theme : !PanelLayout.serverTheme.isEmpty() ? PanelLayout.serverTheme : e.theme;
+        Theme th = Theme.byId(themeId);
+        // card 6: the inspector's live preview draws its panel at the size / binding being edited
+        int sw = t.screenW, sh = t.screenH;
+        int[] ov = dev.agentcraft.gtnh.client.edit.ClientEdit.sizeOverride(t.xCoord, t.yCoord, t.zCoord);
+        if (ov != null) {
+            sw = ov[0];
+            sh = ov[1];
+        }
+        String bo = dev.agentcraft.gtnh.client.edit.ClientEdit.bindingOverride(t.xCoord, t.yCoord, t.zCoord);
+        String binding = bo != null ? bo : t.binding;
         PanelContext c = new PanelContext(
             e.panel,
-            t.binding,
-            PanelRegistry.resolve(r.source(), t.binding),
+            binding,
+            PanelRegistry.resolve(r.source(), binding),
             th,
             e.pxPerBlock,
-            t.screenW,
-            t.screenH,
+            sw,
+            sh,
             distance,
             ppb,
             lod(t, ppb),
             System.currentTimeMillis());
-        beginCanvas(t, x, y, z, e.pxPerBlock);
+        beginCanvas(t, x, y, z, e.pxPerBlock, sw, sh);
         // frame and background write depth (the screen occludes what is behind it), then painter's order
         float f = c.em(0.035);
         Ui.rectZ(-f, -f, c.w + f, c.h + f, 0xFF000000 | th.frame, -0.2);
@@ -82,6 +93,14 @@ public final class InWorldPanels {
         GL11.glDepthMask(false);
         try {
             r.render(c);
+            if (PanelLayout.showLabels && !t.label.isEmpty()) {
+                // card 6: the panel's label on a small plate just above the screen (panels often
+                // stand on the floor, where a plate under them would be inside the ground)
+                dev.agentcraft.gtnh.ui.UiFont lf = dev.agentcraft.gtnh.ui.UiFont.bold();
+                float size = c.em(0.16);
+                float lw = lf.width(t.label, size) + size * 1.1F;
+                Ui.pill(lf, t.label, (c.w - lw) / 2, -f - c.em(0.05) - Ui.pillHeight(lf, size), size, th.accent);
+            }
         } finally {
             endCanvas();
         }
@@ -89,13 +108,17 @@ public final class InWorldPanels {
 
     /** Canvas on the block's front face: origin = top-left of a W x H screen, +x right, +y down. */
     static void beginCanvas(TileAgentCraft t, double x, double y, double z, int px) {
+        beginCanvas(t, x, y, z, px, t.screenW, t.screenH);
+    }
+
+    static void beginCanvas(TileAgentCraft t, double x, double y, double z, int px, int sw, int sh) {
         int meta = t.getBlockMetadata();
         float rot = meta == 2 ? 180.0F : meta == 4 ? -90.0F : meta == 5 ? 90.0F : 0.0F;
         float s = 1.0F / px;
         GL11.glPushMatrix();
         GL11.glTranslated(x + 0.5, y + 0.5, z + 0.5);
         GL11.glRotatef(rot, 0.0F, 1.0F, 0.0F);
-        GL11.glTranslated(-t.screenW / 2.0, -0.5 + t.screenH, 0.512);
+        GL11.glTranslated(-sw / 2.0, -0.5 + sh, 0.512);
         GL11.glScalef(s, -s, s);
         GL11.glNormal3f(0.0F, 0.0F, 1.0F);
         GL11.glDisable(GL11.GL_LIGHTING);

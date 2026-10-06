@@ -1,0 +1,23 @@
+{
+  "schema": 2,
+  "kind": "agentcraft-office-layout",
+  "name": "Focus pods",
+  "description": "Two quiet pods with big monitors and a lamp each, the library between them, the atrium behind.",
+  "facing": "north",
+  "panels": [
+    {"at": [-3, 1, -4], "type": "monitor", "facing": "south", "binding": "agent-1", "w": 3, "h": 2},
+    {"at": [3, 1, -4], "type": "monitor", "facing": "south", "binding": "agent-2", "w": 3, "h": 2},
+    {"at": [-5, 1, -4], "type": "status_lamp", "facing": "north", "binding": "agent-1", "w": 1, "h": 1},
+    {"at": [5, 1, -4], "type": "status_lamp", "facing": "north", "binding": "agent-2", "w": 1, "h": 1},
+    {"at": [0, 0, -4], "type": "library", "facing": "south", "binding": "all", "w": 1, "h": 1},
+    {"at": [0, 0, 4], "type": "goal_atrium", "facing": "north", "binding": "all", "w": 3, "h": 3}
+  ],
+  "anchors": [
+    {"name": "desk", "at": [-3, 0, -2], "facing": "north"},
+    {"name": "desk_2", "at": [3, 0, -2], "facing": "north"},
+    {"name": "library", "at": [0, 0, -2], "facing": "north"},
+    {"name": "user", "at": [0, 0, 0], "facing": "north"},
+    {"name": "lounge", "at": [0, 0, 2], "facing": "south"}
+  ],
+  "display": {"theme": "light"}
+}

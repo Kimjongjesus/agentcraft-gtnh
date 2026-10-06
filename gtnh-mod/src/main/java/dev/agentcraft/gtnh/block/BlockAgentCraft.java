@@ -97,6 +97,11 @@ public class BlockAgentCraft extends BlockContainer {
     @Override
     public boolean onBlockActivated(World w, int x, int y, int z, EntityPlayer p, int side, float hx, float hy, float hz) {
         TileEntity te = w.getTileEntity(x, y, z);
+        // card 6: with the edit tool in edit mode, a click opens the Panel Inspector instead
+        if (dev.agentcraft.gtnh.item.ItemEditTool.isOn(p.getHeldItem())) {
+            if (w.isRemote) AgentCraftGTNH.proxy.openInspector(x, y, z);
+            return true;
+        }
         String b = te instanceof TileAgentCraft ? ((TileAgentCraft) te).binding : "";
         if (kind == Kind.TASKWALL || kind == Kind.LIBRARY || kind == Kind.ATRIUM) {
             if (w.isRemote) AgentCraftGTNH.proxy.openHqScreen(kind, b);

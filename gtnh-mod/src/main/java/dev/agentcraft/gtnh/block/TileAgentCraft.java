@@ -18,6 +18,16 @@ public class TileAgentCraft extends TileEntity {
 
     public String binding = "";
     public int screenW = 3, screenH = 2;
+    /** Card 6: an optional label (edit tool inspector) and a per-panel theme ("" = layout default). */
+    public String label = "", theme = "";
+
+    /** Card 6: set label and theme (sanitized by the caller, re-capped here). */
+    public void setLook(String l, String th) {
+        label = l == null ? "" : l.length() > 32 ? l.substring(0, 32) : l;
+        theme = "dark".equals(th) || "light".equals(th) ? th : "";
+        markDirty();
+        if (worldObj != null) worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
+    }
 
     public void setBinding(String b, int w, int h) {
         binding = b == null ? "" : b;
@@ -48,6 +58,8 @@ public class TileAgentCraft extends TileEntity {
         tag.setString("binding", binding);
         tag.setInteger("screenW", screenW);
         tag.setInteger("screenH", screenH);
+        if (!label.isEmpty()) tag.setString("label", label);
+        if (!theme.isEmpty()) tag.setString("theme", theme);
     }
 
     private void readCustom(NBTTagCompound tag) {
@@ -55,6 +67,9 @@ public class TileAgentCraft extends TileEntity {
         if (binding.length() > 64) binding = binding.substring(0, 64);
         if (tag.hasKey("screenW")) screenW = Math.min(Math.max(tag.getInteger("screenW"), 1), 8);
         if (tag.hasKey("screenH")) screenH = Math.min(Math.max(tag.getInteger("screenH"), 1), 6);
+        label = dev.agentcraft.gtnh.edit.PanelSpec.cleanLabel(tag.getString("label"));
+        String th = tag.getString("theme");
+        theme = "dark".equals(th) || "light".equals(th) ? th : "";
     }
 
     @Override

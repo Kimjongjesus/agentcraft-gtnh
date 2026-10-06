@@ -32,6 +32,9 @@ import dev.agentcraft.gtnh.Config;
 import dev.agentcraft.gtnh.block.BlockAgentCraft;
 import dev.agentcraft.gtnh.block.TileAgentCraft;
 import dev.agentcraft.gtnh.bridge.ForemanBridge;
+import dev.agentcraft.gtnh.edit.EditEngine;
+import dev.agentcraft.gtnh.edit.Json;
+import dev.agentcraft.gtnh.server.EditService;
 import dev.agentcraft.gtnh.entity.EntityHermesAgent;
 import dev.agentcraft.gtnh.hq.Anchor;
 import dev.agentcraft.gtnh.hq.HqAnchors;
@@ -60,7 +63,7 @@ import dev.agentcraft.gtnh.state.HqData;
  */
 public class CommandAgentCraft extends CommandBase {
 
-    private static final String USAGE = "/agentcraft <status|agents|board|anchor|bind|give|cap|help>";
+    private static final String USAGE = "/agentcraft <status|agents|board|anchor|bind|give|edit|cap|help>";
 
     @Override
     public String getCommandName() {
@@ -112,6 +115,9 @@ public class CommandAgentCraft extends CommandBase {
             case "boards":
                 board(sender);
                 return;
+            case "edit":
+                edit(sender, args);
+                return;
             case "help":
                 help(sender);
                 return;
@@ -130,6 +136,11 @@ public class CommandAgentCraft extends CommandBase {
         say(s, " bind overflow                    a vanilla sign: +N more agents");
         say(s, " bind ... <x> <y> <z> [w h]       console form; cap <0..64> NPC cap until restart");
         say(s, " Right-click a task wall / atrium (cards + details) or library (notes): read-only screens.");
+        say(s, "\u00a76 Office edit tool (card 6): give edittool, then sneak + right-click to edit");
+        say(s, " edit status|undo|redo|history|lock [why]|unlock|scan [r]|audit [n]|reload");
+        say(s, " edit snapshot save|diff|restore <name> | snapshot list");
+        say(s, " edit preset list | preset <name> [add|replace] | import <name> [add|replace] | imports");
+        say(s, " edit export <name> [radius] [keep] | apply <token>   (presets/imports are dry runs until applied)");
     }
 
     private static void board(ICommandSender sender) {
@@ -307,13 +318,28 @@ public class CommandAgentCraft extends CommandBase {
                     }
                     dim = p.dimension;
                 }
-                try {
-                    an.put(a, dim);
-                } catch (IOException e) {
-                    say(sender, "\u00a7c[AgentCraft] not saved: " + e.getMessage());
-                    return;
+                if (EditService.instance != null && EditService.instance.routes()) {
+                    // card 6: recorded (undoable, audited) and refused while editing is locked
+                    if (!an.all()
+                        .isEmpty() && dim != an.dimension()) {
+                        say(sender, "\u00a7c[AgentCraft] not saved: the HQ is in dimension " + an.dimension() + "; anchors cannot span dimensions");
+                        return;
+                    }
+                    EditEngine.Result r = EditService.instance.recordAnchor(sender instanceof EntityPlayerMP ? (EntityPlayerMP) sender : null, dim, name, a);
+                    if (!r.ok || !r.lines.isEmpty() && r.lines.get(r.lines.size() - 1)
+                        .startsWith("skip")) {
+                        say(sender, "\u00a7c[AgentCraft] not saved: " + r.message + (r.lines.isEmpty() ? "" : " " + r.lines.get(r.lines.size() - 1)));
+                        return;
+                    }
+                } else {
+                    try {
+                        an.put(a, dim);
+                    } catch (IOException e) {
+                        say(sender, "\u00a7c[AgentCraft] not saved: " + e.getMessage());
+                        return;
+                    }
+                    sync.anchorsChanged();
                 }
-                sync.anchorsChanged();
                 say(sender, "[AgentCraft] anchor " + a + " (dim " + dim + ") saved to " + an.file()
                     .getPath());
                 if (!StationAssigner.isStandingAnchor(name) && !name.startsWith("cam_")
@@ -325,8 +351,18 @@ public class CommandAgentCraft extends CommandBase {
             case "remove":
             case "rm": {
                 if (args.length < 3) throw new WrongUsageException("/agentcraft anchor remove <name>");
+                String rmName = args[2].toLowerCase(Locale.ROOT);
+                if (EditService.instance != null && EditService.instance.routes()) {
+                    if (an.get(rmName) == null) {
+                        say(sender, "\u00a7c[AgentCraft] no anchor " + args[2]);
+                        return;
+                    }
+                    EditEngine.Result r = EditService.instance.recordAnchor(sender instanceof EntityPlayerMP ? (EntityPlayerMP) sender : null, an.dimension(), rmName, null);
+                    say(sender, r.ok ? "[AgentCraft] removed anchor " + args[2] + " (undo: /agentcraft edit undo)" : "\u00a7c[AgentCraft] not removed: " + r.message);
+                    return;
+                }
                 try {
-                    boolean ok = an.remove(args[2].toLowerCase(Locale.ROOT));
+                    boolean ok = an.remove(rmName);
                     say(sender, ok ? "[AgentCraft] removed anchor " + args[2] : "\u00a7c[AgentCraft] no anchor " + args[2]);
                     if (ok) sync.anchorsChanged();
                 } catch (IOException e) {
@@ -471,14 +507,26 @@ public class CommandAgentCraft extends CommandBase {
                 say(sender, "\u00a7c[AgentCraft] the overflow count goes on a vanilla sign you placed; that block is not one");
                 return;
             }
-            try {
-                CommonProxy.sync.anchors()
-                    .put(new Anchor(HqAnchors.OVERFLOW_SIGN, x, y, z, 0.0F, 0.0F), world.provider.dimensionId);
-            } catch (IOException e) {
-                say(sender, "\u00a7c[AgentCraft] not saved: " + e.getMessage());
-                return;
+            if (EditService.instance != null && EditService.instance.routes()) {
+                EditEngine.Result r = EditService.instance.recordAnchor(
+                    sender instanceof EntityPlayerMP ? (EntityPlayerMP) sender : null,
+                    world.provider.dimensionId,
+                    HqAnchors.OVERFLOW_SIGN,
+                    new Anchor(HqAnchors.OVERFLOW_SIGN, x, y, z, 0.0F, 0.0F));
+                if (!r.ok) {
+                    say(sender, "\u00a7c[AgentCraft] not saved: " + r.message);
+                    return;
+                }
+            } else {
+                try {
+                    CommonProxy.sync.anchors()
+                        .put(new Anchor(HqAnchors.OVERFLOW_SIGN, x, y, z, 0.0F, 0.0F), world.provider.dimensionId);
+                } catch (IOException e) {
+                    say(sender, "\u00a7c[AgentCraft] not saved: " + e.getMessage());
+                    return;
+                }
+                CommonProxy.sync.anchorsChanged();
             }
-            CommonProxy.sync.anchorsChanged();
             say(sender, "[AgentCraft] overflow sign set at " + x + " " + y + " " + z);
             return;
         }
@@ -502,7 +550,14 @@ public class CommandAgentCraft extends CommandBase {
         }
         int w = args.length > rest ? parseIntBounded(sender, args[rest], 1, 8) : 0;
         int h = args.length > rest + 1 ? parseIntBounded(sender, args[rest + 1], 1, 6) : 0;
-        ((TileAgentCraft) te).setBinding(binding, w, h);
+        EditEngine.Result rec = EditService.instance != null && EditService.instance.routes()
+            ? EditService.instance.recordBind(sender instanceof EntityPlayerMP ? (EntityPlayerMP) sender : null, world, x, y, z, binding, w, h)
+            : null;
+        if (rec != null && !rec.ok) {
+            say(sender, "\u00a7c[AgentCraft] not bound: " + rec.message);
+            return;
+        }
+        if (rec == null) ((TileAgentCraft) te).setBinding(binding, w, h);
         boolean screen = te instanceof TileAgentCraft.Monitor || te instanceof TileAgentCraft.TaskWall;
         say(
             sender,
@@ -537,7 +592,7 @@ public class CommandAgentCraft extends CommandBase {
     // ---- give -----------------------------------------------------------------------------
 
     private void give(ICommandSender sender, String[] args) {
-        if (args.length < 2) throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon|taskwall|library|atrium> [count]");
+        if (args.length < 2) throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon|taskwall|library|atrium|edittool> [count]");
         EntityPlayerMP p = getCommandSenderAsPlayer(sender);
         Block b;
         switch (args[1].toLowerCase(Locale.ROOT)) {
@@ -560,8 +615,20 @@ public class CommandAgentCraft extends CommandBase {
             case "atrium":
                 b = CommonProxy.atrium;
                 break;
+            case "edittool":
+            case "tool": {
+                String deny = EditService.instance == null ? "edit tool not running" : EditService.instance.denied(p);
+                if (deny != null) {
+                    say(sender, "\u00a7c[AgentCraft] " + deny);
+                    return;
+                }
+                p.inventory.addItemStackToInventory(EditService.toolStack());
+                p.inventoryContainer.detectAndSendChanges();
+                say(sender, "[AgentCraft] gave the Office Edit Tool. Sneak + right-click to enter edit mode.");
+                return;
+            }
             default:
-                throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon|taskwall|library|atrium> [count]");
+                throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon|taskwall|library|atrium|edittool> [count]");
         }
         int n = args.length >= 3 ? parseIntBounded(sender, args[2], 1, 64) : 1;
         p.inventory.addItemStackToInventory(new ItemStack(b, n));
@@ -569,12 +636,171 @@ public class CommandAgentCraft extends CommandBase {
         say(sender, "[AgentCraft] gave " + n + " " + args[1]);
     }
 
+    // ---- edit (card 6) --------------------------------------------------------------------
+
+    private void edit(ICommandSender sender, String[] args) {
+        EditService es = EditService.instance;
+        if (es == null || es.engine == null) {
+            say(sender, "\u00a7c[AgentCraft] the edit tool is not running");
+            return;
+        }
+        EntityPlayerMP p = sender instanceof EntityPlayerMP ? (EntityPlayerMP) sender : null;
+        String op = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+        String a1 = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "";
+        String a2 = args.length > 3 ? args[3].toLowerCase(Locale.ROOT) : "";
+        String a3 = args.length > 4 ? args[4].toLowerCase(Locale.ROOT) : "";
+        switch (op) {
+            case "lock": {
+                // the panic switch: any op who may run /agentcraft (level 2), even if not on the editors list
+                StringBuilder why = new StringBuilder();
+                for (int i = 2; i < args.length; i++) why.append(i > 2 ? " " : "")
+                    .append(args[i]);
+                say(sender, "[AgentCraft] " + es.engine.setLock(EditService.who(p), true, why.toString()).message);
+                return;
+            }
+            case "unlock": {
+                String deny = es.denied(p);
+                if (deny != null) {
+                    say(sender, "\u00a7c[AgentCraft] " + deny);
+                    return;
+                }
+                say(sender, "[AgentCraft] " + es.engine.setLock(EditService.who(p), false, "").message);
+                return;
+            }
+            case "status": {
+                EditEngine e = es.engine;
+                say(
+                    sender,
+                    "[AgentCraft] edit tool: " + (e.locked() ? "\u00a7cLOCKED\u00a7r (" + e.lockInfo() + ")" : "unlocked")
+                        + (e.readOnly() != null ? " \u00a7cREAD-ONLY\u00a7r " + e.readOnly() : "")
+                        + " | panels "
+                        + e.panels()
+                            .size()
+                        + "/"
+                        + es.rules.maxPanels
+                        + " | undo "
+                        + e.undoStack()
+                            .size()
+                        + " redo "
+                        + e.redoStack()
+                            .size()
+                        + " | snapshots "
+                        + es.store.snapshots()
+                            .size()
+                        + " | protected areas "
+                        + es.rules.exclusions.size()
+                        + " | layout "
+                        + es.store.layoutFile()
+                            .getPath()
+                        + " | audit "
+                        + es.audit.file()
+                            .getPath());
+                for (String n : e.notes()) say(sender, "\u00a7e  " + n);
+                return;
+            }
+            case "history": {
+                say(sender, "[AgentCraft] undo (newest first):");
+                int i = 0;
+                for (dev.agentcraft.gtnh.edit.Op o : es.engine.undoStack()) {
+                    if (i++ >= 10) break;
+                    say(sender, "  " + o.label + " (" + o.changes.size() + " change(s), " + o.who + ")");
+                }
+                say(sender, "[AgentCraft] redo: " + es.engine.redoStack()
+                    .size() + " step(s)");
+                return;
+            }
+            case "audit": {
+                int n = a1.isEmpty() ? 8 : parseIntBounded(sender, a1, 1, 30);
+                for (String l : es.audit.recent(n)) say(sender, "  " + l);
+                return;
+            }
+            case "reload": {
+                String deny = es.denied(p);
+                if (deny != null) {
+                    say(sender, "\u00a7c[AgentCraft] " + deny);
+                    return;
+                }
+                es.start(MinecraftServer.getServer());
+                say(sender, "[AgentCraft] edit layout reloaded: " + es.engine.panels()
+                    .size() + " panels" + (es.engine.readOnly() != null ? " \u00a7cREAD-ONLY " + es.engine.readOnly() : ""));
+                return;
+            }
+            default:
+        }
+        java.util.Map<String, Object> m = new java.util.LinkedHashMap<>();
+        String action;
+        switch (op) {
+            case "undo":
+            case "redo":
+                action = op;
+                break;
+            case "scan":
+                action = "scan";
+                if (!a1.isEmpty()) m.put("radius", (double) parseIntBounded(sender, a1, 1, 48));
+                break;
+            case "snapshot":
+            case "snap":
+                if ("list".equals(a1) || a1.isEmpty()) {
+                    say(sender, "[AgentCraft] snapshots: " + String.join(", ", es.store.snapshots()));
+                    return;
+                }
+                if (a2.isEmpty()) throw new WrongUsageException("/agentcraft edit snapshot save|diff|restore <name>");
+                action = "save".equals(a1) ? "snap.save" : "diff".equals(a1) ? "snap.diff" : "restore".equals(a1) ? "snap.restore" : null;
+                if (action == null) throw new WrongUsageException("/agentcraft edit snapshot save|diff|restore <name>");
+                m.put("name", a2);
+                break;
+            case "preset":
+            case "presets":
+                if ("list".equals(a1) || a1.isEmpty()) {
+                    say(sender, "[AgentCraft] presets: " + String.join(", ", es.presetIds()) + "  (dry run: /agentcraft edit preset <name> add|replace)");
+                    return;
+                }
+                action = "preset.dry";
+                m.put("name", a1);
+                m.put("mode", a2.isEmpty() ? "add" : a2);
+                break;
+            case "imports":
+                say(sender, "[AgentCraft] importable: " + String.join(", ", es.importNames()) + " (from " + es.store.dir.getPath() + "/imports and /exports)");
+                return;
+            case "import":
+                if (a1.isEmpty()) throw new WrongUsageException("/agentcraft edit import <name> [add|replace]");
+                action = "import.dry";
+                m.put("name", a1);
+                m.put("mode", a2.isEmpty() ? "add" : a2);
+                break;
+            case "export":
+                if (a1.isEmpty()) throw new WrongUsageException("/agentcraft edit export <name> [radius] [keep]");
+                action = "export";
+                m.put("name", a1);
+                if (!a2.isEmpty() && isInt(a2)) m.put("radius", (double) parseIntBounded(sender, a2, 2, 64));
+                m.put("keepNames", "keep".equals(a2) || "keep".equals(a3));
+                break;
+            case "apply":
+                if (a1.isEmpty()) throw new WrongUsageException("/agentcraft edit apply <token>");
+                action = "plan.apply";
+                m.put("token", args[2]);
+                break;
+            default:
+                throw new WrongUsageException("/agentcraft edit <status|undo|redo|history|lock|unlock|snapshot|preset|import|imports|export|apply|scan|audit|reload>");
+        }
+        for (String line : es.command(p, action, m)) say(sender, line);
+    }
+
     // ---- tab completion -------------------------------------------------------------------
 
     @Override
     @SuppressWarnings("rawtypes")
     public List addTabCompletionOptions(ICommandSender sender, String[] args) {
-        if (args.length == 1) return getListOfStringsMatchingLastWord(args, "status", "agents", "board", "anchor", "bind", "give", "cap", "help");
+        if (args.length == 1) return getListOfStringsMatchingLastWord(args, "status", "agents", "board", "anchor", "bind", "give", "edit", "cap", "help");
+        if (args.length == 2 && "edit".equalsIgnoreCase(args[0])) {
+            return getListOfStringsMatchingLastWord(args, "status", "undo", "redo", "history", "lock", "unlock", "snapshot", "preset", "import", "imports", "export", "apply", "scan", "audit", "reload");
+        }
+        if (args.length == 3 && "edit".equalsIgnoreCase(args[0]) && "snapshot".equalsIgnoreCase(args[1])) {
+            return getListOfStringsMatchingLastWord(args, "save", "diff", "restore", "list");
+        }
+        if (args.length == 3 && "edit".equalsIgnoreCase(args[0]) && "preset".equalsIgnoreCase(args[1]) && EditService.instance != null && EditService.instance.engine != null) {
+            return getListOfStringsFromIterableMatchingLastWord(args, EditService.instance.presetIds());
+        }
         if (args.length == 2 && "anchor".equalsIgnoreCase(args[0])) {
             return getListOfStringsMatchingLastWord(args, "set", "remove", "list", "tp", "missing", "show", "reload");
         }
@@ -605,7 +831,7 @@ public class CommandAgentCraft extends CommandBase {
             return getListOfStringsFromIterableMatchingLastWord(args, names);
         }
         if (args.length == 2 && "give".equalsIgnoreCase(args[0])) {
-            return getListOfStringsMatchingLastWord(args, "monitor", "lamp", "beacon", "taskwall", "library", "atrium");
+            return getListOfStringsMatchingLastWord(args, "monitor", "lamp", "beacon", "taskwall", "library", "atrium", "edittool");
         }
         return null;
     }

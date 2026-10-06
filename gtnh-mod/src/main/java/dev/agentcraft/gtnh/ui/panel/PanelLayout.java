@@ -21,8 +21,9 @@ import dev.agentcraft.gtnh.AgentCraftGTNH;
  * The office layout file, {@code config/agentcraftgtnh/office-layout.json} (client side; written
  * with the defaults on first start, re-read within a few seconds after a hand edit). It says which
  * panel each block kind shows, in which theme and resolution, the level-of-detail thresholds, and
- * optional per-block overrides by position. Card 6's in-game edit tool is meant to write this same
- * file (presets = copies of it); renderers never hard-code which block shows what.
+ * optional per-block overrides by position. Card 6's edit tool keeps the server's hq-layout.json
+ * instead; its display options and per-panel theme override this file, which stays the local
+ * default. Renderers never hard-code which block shows what.
  *
  * <pre>
  * {
@@ -181,6 +182,32 @@ public final class PanelLayout {
             inst.panel.isEmpty() ? base.panel : inst.panel,
             inst.theme,
             inst.pxPerBlock);
+    }
+
+    // ---- card 6: display options from the server's layout (edit tool) ----------------------
+
+    /** "" = use this file's theme; else dark | light for every panel without its own theme. */
+    public static volatile String serverTheme = "";
+    public static volatile boolean showLabels;
+    public static volatile double serverNear = -1, serverMid = -1;
+
+    public static void serverDisplay(String json) {
+        try {
+            java.util.Map<String, Object> m = dev.agentcraft.gtnh.edit.Json.parseObject(json);
+            String th = dev.agentcraft.gtnh.edit.Json.str(m, "theme", "");
+            serverTheme = "dark".equals(th) || "light".equals(th) ? th : "";
+            showLabels = "true".equals(dev.agentcraft.gtnh.edit.Json.str(m, "showLabels", "false"));
+            serverNear = clamp(dev.agentcraft.gtnh.edit.Json.num(m, "nearPx", -1), -1, 2000);
+            serverMid = clamp(dev.agentcraft.gtnh.edit.Json.num(m, "midPx", -1), -1, 2000);
+        } catch (dev.agentcraft.gtnh.edit.Json.ParseException ignored) {}
+    }
+
+    public static double near() {
+        return serverNear > 0 ? serverNear : nearPx;
+    }
+
+    public static double mid() {
+        return serverMid > 0 ? Math.min(serverMid, near()) : midPx;
     }
 
     public static String file() {

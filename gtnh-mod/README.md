@@ -266,13 +266,109 @@ Extension points (used by later cards; nothing else has to change):
 1. a new panel type: implement `PanelRenderer` (id, source, `render(PanelContext)`), call
    `PanelRegistry.register` in `ClientProxy`, name it in the layout file;
 2. a new data source: `PanelRegistry.registerSource("id", binding -> data)`;
-3. the in-game edit tool (card 6) writes the same layout file; presets are copies of it.
+3. the in-game edit tool (card 6, below) keeps a server-side `hq-layout.json`; its display options
+   (theme, detail thresholds) override this client file, which stays the local default. Adding a
+   panel type or a block kind needs no editor change: the palette lists every registered kind.
 
 **One count, two windows.** The adapter sends every done card ever as the goal's `counts.done`
 (the ring, "all time") and the done cards inside its task window as `doneRecent` with `windowDays`
 (the wall's Done column, "last 3 days"). Wall, atrium, beacon label and task wall screen all read
 these from `client/BoardView`, so they cannot disagree; the screen's Done filter explains the two
 numbers. Older adapters without `doneRecent` fall back to the list count.
+
+### 6. The office edit tool (card 6)
+
+The office stays Eli's build: the mod never generates or breaks world blocks on its own. Card 6
+adds a tool that makes *its own* parts of the office (panel blocks, their bindings, sizes and
+labels, the station anchors and the display options) friendly to change and reversible.
+
+**Getting started.** An op runs `/agentcraft give edittool` (not in any creative tab), then
+sneak + right-clicks with it to enter edit mode (the item glows; the server checks the op level).
+In edit mode:
+
+- looking at a panel shows an overlay: what it is, what it is bound to, its size, facing and
+  position, with corner handles on the panel's whole face; looking at an anchor marker shows the
+  station, slot and facing. All anchors show as markers with name plates (green = station spot,
+  cyan = camera, yellow = block anchor).
+- right-click a panel: the **Panel Inspector** (rebind from a searchable list of agents, boards
+  and sources, no typed ids; resize w x h with a live outline in the world; label; per-panel theme;
+  duplicate next to it; delete with a second click to confirm);
+- right-click an anchor marker: the **Anchor Editor** with that anchor selected;
+- right-click anywhere else: the **Office editor** with three tabs:
+  - **Panel palette**: every registered panel kind (task wall, goal atrium, library, desk monitor,
+    status lamp, fleet beacon, overflow sign and anything later cards register) with a preview
+    and "give me this block". The list comes from the registry: a new kind needs no editor change.
+  - **Anchor editor**: every station from `hq-anchors.json` grouped with slot counts, missing
+    stations (agents of a station without an anchor still fall back to the lounge), and for the
+    selected anchor: move to my crosshair / my feet, rotate, add a slot, teleport, remove.
+  - **Layouts & undo**: undo/redo with the step names, named snapshots (save, diff against the
+    current layout, restore), presets and imports with a dry run (what would change, conflicts,
+    bounding box) before "apply", export, display options, and the lock.
+
+Every action is a request to the server, which re-checks permission, lock, limits and the world
+before anything happens; the client never changes the world itself.
+
+**Commands** (all still work without the tool; `/agentcraft anchor ...` and `/agentcraft bind ...`
+behave as before and are now recorded, undoable and blocked while locked):
+
+| command | what |
+|---|---|
+| `/agentcraft edit status` | lock, panels / max, undo and redo depth, snapshots, protected areas, files |
+| `/agentcraft edit undo` / `redo` / `history` | step back / forward (64 kept, the last 20 survive a restart) |
+| `/agentcraft edit snapshot save\|diff\|restore\|list <name>` | named layouts; diff lists what restore would change |
+| `/agentcraft edit preset [<name> add\|replace]` | list presets, or dry-run one at your feet facing your way |
+| `/agentcraft edit export <name> [radius] [keep]` | write `exports/<name>.json` relative to where you stand |
+| `/agentcraft edit imports` / `import <name> [add\|replace]` | list importable files / dry-run one |
+| `/agentcraft edit apply <token>` | apply your own dry run (5 minutes; refused if the area changed since, so you get what the dry run showed) |
+| `/agentcraft edit scan [radius]` | adopt panels placed before card 6 (or with `/setblock`) into the layout |
+| `/agentcraft edit lock [reason]` / `unlock` | the panic switch (below) |
+| `/agentcraft edit audit [n]` / `reload` | last audit lines / re-read the layout files |
+
+**Files** (next to `hq-anchors.json`, all human-readable JSON, written to a temp file and moved over
+the target so a crash never leaves half a file; names are `[a-z0-9_-]`, max 32):
+`hq-layout.json` (the per-world layout: panels, display options, the last 20 undo/redo steps,
+`"schema": 2`), `edit-lock.json` (while locked), `layouts/` (snapshots), `exports/`, `imports/`,
+`presets/` (your own; `open-office`, `noc-wall` and `focus-pods` are bundled). A card 4
+`office-layout.json` (`"version": 1`) is migrated (theme and detail thresholds kept); a layout
+written by a newer schema makes editing read-only instead of being overwritten.
+
+**Sharing layouts.** An export stores positions relative to the origin you stand on and your
+facing; agent ids, board slugs and labels become placeholders unless you add `keep`. An import or
+preset is placed at your feet, turned to your facing, and always goes through a dry run that shows
+the bounding box, every change and every conflict. `add` only fills empty cells (an existing panel
+is kept; a station that already has an anchor gets a new numbered slot). `replace` first removes
+every AgentCraft panel of the layout and every non-camera anchor, then places the new one; the dry
+run lists all of it, and undo reverts the whole apply in one step.
+
+**Safety rules** (enforced in the pure-Java engine and again in the Forge world port):
+
+- the tool only places this mod's panel blocks, and only on air or over another AgentCraft panel;
+  it only removes or changes AgentCraft panels, and only moves this mod's anchors. Any other block,
+  tile entity or GregTech machine in the way is listed as a conflict and skipped, never replaced;
+- nothing happens in an unloaded chunk, outside the box a dry run confirmed, or within a protected
+  radius (`protectedAreas`, empty by default);
+- only ops at `opLevel` (and, if set, only `allowedPlayers`) may edit; the server console always may;
+- limits: `editsPerSecond` per player (bursts of twice that), `maxPanels` per layout,
+  `maxLayoutKB` per layout / snapshot / import file, `maxImportSpan` per import or preset;
+- `/agentcraft edit lock` (any op allowed to run `/agentcraft`, even one not on the editors list)
+  stops the tool, every edit command, anchor and bind changes and every layout write server-wide
+  until an editor runs `unlock`. The lock survives a restart;
+- every placement, removal and change goes to `agentcraft-edit-audit.log` in the server directory:
+  UTC time, who, what, where, before and after (block id/meta or value). Append-only, rolls to `.1`.
+- nothing here talks to Hermes: the adapter stays read-only, and no network listener changes.
+
+**Tests.** `dev/tests/EditCheck.java` (run by `dev/tests/run.sh`, no Minecraft needed) drives the
+same engine with a fake world: operation log and undo/redo (including the 64-step cap and the 20
+persisted steps), snapshots, diff and restore, presets and import conflicts (stone, a tile entity,
+a foreign block in a panel cell), the confirmed box, schema migration and refusal of newer schemas,
+rate limits, panel and size caps, the lock, protected radii, the audit record, and a randomized run
+of thousands of edits checking that nothing but AgentCraft panels is ever placed or removed.
+
+**Verified where.** The screens and edits were exercised on the plain Forge 1.7.10 dev client and
+server with generic fixtures (`dev/qa-arena-card6.txt`; the `devact` QA hook in `DevShots` runs
+editor actions as the dev player and exists only in a dev client started with
+`-Dagentcraft.dev.shotOnChat`). Not verified yet: the full GTNH client and a GTNH server with
+GregTech machines next to the panels (the engine's foreign-block rules are what protect them).
 
 ### Other commands
 
@@ -308,7 +404,10 @@ Forge 10.13.4.1614, Jabel; template licence in `LICENSE-template`).
 
 - RFG dev server on ai-ops (plain Forge + this mod, FLAT world, loopback port 25571):
   `dev/run-hq-qa.sh start <adapter ws url> [display]`, then `cmd`, `run`, `feed`, `stop`. With a
-  display a dev client joins and takes a screenshot on `say devshot NAME`.
+  display a dev client joins and takes a screenshot on `say devshot NAME`. The GTNH buildscript
+  gives the dev client `-Xmx6G`; on a memory-capped machine or session, cap the run tasks' heap
+  (e.g. `maxHeapSize = '1536m'` for `runClient` from a Gradle init script in your Gradle home), or
+  the client grows until the kernel kills the session.
 - `dev/qa-arena.txt`: the throwaway test arena (a few `setblock`s, bindings, anchors, cameras) at
   about x -64..-38, y 4, z -237..-212, just south of the FLAT spawn (-56, 4, -246). It is **not**
   the HQ.

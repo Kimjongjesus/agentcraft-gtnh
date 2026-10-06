@@ -25,6 +25,17 @@ public class Config {
     public static int boardSyncSeconds = 2;
     public static int wallRenderDistance = 32;
     public static int wallPageSeconds = 8;
+    // card 6: the office edit tool
+    public static boolean editEnabled = true;
+    public static int editOpLevel = 2;
+    public static String[] editPlayers = new String[0];
+    public static String[] editProtected = new String[0];
+    public static int editMaxPanels = 256;
+    public static int editMaxLayoutKB = 256;
+    public static int editUndoSteps = 64;
+    public static double editPerSecond = 4;
+    public static int editMaxImportSpan = 48;
+    public static String editAuditLog = "agentcraft-edit-audit.log";
 
     public static void synchronizeConfiguration(File configFile) {
         Configuration c = new Configuration(configFile);
@@ -109,6 +120,29 @@ public class Config {
             2,
             120,
             "Client: a task wall column with more cards than fit flips to its next page this often.");
+        String ed = "edit";
+        editEnabled = c.getBoolean(
+            "enabled",
+            ed,
+            editEnabled,
+            "Card 6 office edit tool. false = the tool, the edit commands and every layout write are off (anchor/bind commands still work as before).");
+        editOpLevel = c.getInt("opLevel", ed, editOpLevel, 1, 4, "Op permission level needed to use the edit tool and /agentcraft edit (and to toggle edit mode).");
+        editPlayers = c.getStringList(
+            "allowedPlayers",
+            ed,
+            editPlayers,
+            "If not empty: only these player names (who must also be ops at opLevel) may edit. The server console always may.");
+        editProtected = c.getStringList(
+            "protectedAreas",
+            ed,
+            editProtected,
+            "Exclusion points in the HQ dimension, \"x,y,z,radius # note\": the tool never places or removes anything within radius blocks. Empty by default.");
+        editMaxPanels = c.getInt("maxPanels", ed, editMaxPanels, 1, 4096, "Most panels one layout may hold (placements over it are refused).");
+        editMaxLayoutKB = c.getInt("maxLayoutKB", ed, editMaxLayoutKB, 16, 4096, "Largest layout / snapshot / import JSON in KiB; bigger files are neither written nor read.");
+        editUndoSteps = c.getInt("undoSteps", ed, editUndoSteps, 50, 1000, "Undo steps kept until the server stops (the last 20 are saved in hq-layout.json).");
+        editPerSecond = c.getFloat("editsPerSecond", ed, (float) editPerSecond, 0.5F, 50F, "Most edits per second per player (bursts of twice that).");
+        editMaxImportSpan = c.getInt("maxImportSpan", ed, editMaxImportSpan, 4, 128, "Imports and presets wider/taller/deeper than this many blocks are refused.");
+        editAuditLog = c.getString("auditLog", ed, editAuditLog, "Audit log of every tool placement, removal and change (relative to the server directory).");
         if (c.hasChanged()) {
             c.save();
         }

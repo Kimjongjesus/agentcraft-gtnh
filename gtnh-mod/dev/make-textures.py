@@ -121,6 +121,20 @@ def library_top(x, y):
     return (v, v - 32, v - 56, 255)
 
 
+def edit_tool(x, y):
+    """Card 6 item: a teal T-square with a clay handle, diagonal, on transparency."""
+    # handle: lower-left to the middle
+    d = x + y
+    if 14 <= d <= 16 and 1 <= x <= 8 and abs(x - (15 - y)) <= 1:
+        return (217, 119, 87, 255) if (x + y) % 2 else (190, 98, 70, 255)
+    # head: a bar across the upper right, perpendicular to the handle
+    if 8 <= x <= 14 and 1 <= y <= 7 and abs((x - 11) - (y - 4)) <= 1:
+        return (47, 163, 160, 255) if (x * y) % 3 else (36, 130, 128, 255)
+    if 7 <= x <= 10 and 5 <= y <= 9 and abs((x - 8) + (y - 7)) <= 0:
+        return (244, 239, 230, 255)
+    return (0, 0, 0, 0)
+
+
 def main(out: Path):
     out.mkdir(parents=True, exist_ok=True)
     for name, fn in [("monitor_front", monitor_front), ("monitor_side", monitor_side), ("lamp", lamp),
@@ -129,6 +143,10 @@ def main(out: Path):
                      ("library_top", library_top)]:
         png(out / f"{name}.png", grid(fn))
         print("wrote", out / f"{name}.png")
+    items = out.parent / "items"
+    items.mkdir(parents=True, exist_ok=True)
+    png(items / "edit_tool.png", grid(edit_tool))
+    print("wrote", items / "edit_tool.png")
 
 
 if __name__ == "__main__":

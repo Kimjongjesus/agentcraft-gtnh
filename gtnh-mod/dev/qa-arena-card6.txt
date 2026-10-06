@@ -1,0 +1,23 @@
+# Card-6 additions to the throwaway QA arena (after qa-arena.txt, -card3.txt and -card4.txt). DEV/QA
+# servers ONLY (RFG FLAT world); never the real world. The edit tool is driven as the dev player
+# ("say devact ACTION k=v ..." in DevShots); these console lines only set the scene.
+# the dev player may edit (op level 2) and holds the Office Edit Tool with edit mode on
+op Developer
+give Developer agentcraftgtnh:edit_tool 1 0 {agentcraftEdit:1b}
+# the card 2-4 panels were placed with setblock (no player placement event): adopt them into the layout
+agentcraft edit scan 48
+# cameras: looking straight at the task wall block, at the lounge_2 anchor column, and the open floor
+# east of the arena where presets and an import are tried (x -10..35, z -235..-210 is empty FLAT floor)
+agentcraft anchor set cam_edit_wall -68.5 4 -225.5 90 20
+agentcraft anchor set cam_edit_anchor -54 4 -216.5 180 8
+agentcraft anchor set cam_preset 0.5 4 -222.5 180 0
+agentcraft anchor set cam_preset_view 0.5 13 -207.5 180 38
+agentcraft anchor set cam_import 25.5 4 -222.5 180 0
+agentcraft anchor set cam_import_view 25.5 13 -207.5 180 38
+setblock 0 12 -208 glass
+setblock 25 12 -208 glass
+# things an import must never overwrite: stone where a monitor would land, a furnace (a tile
+# entity, like a GregTech machine) where a lamp would land, and a stone in the task wall's cell
+setblock 22 5 -226 stone
+setblock 30 5 -226 furnace
+setblock 25 4 -231 stonebrick

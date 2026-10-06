@@ -4,6 +4,9 @@
 # Origin: the FLAT world's spawn is (-56, 4, -246); the arena sits 10 blocks south of it, feet y=4.
 gamerule doMobSpawning false
 gamemode 1 Developer
+# a fresh FLAT world may spawn the player far away: stand in the arena first so its chunks are
+# loaded (setblock refuses unloaded chunks with "Cannot place block outside of the world")
+tp Developer -56 4 -240
 # three desks: monitor blocks facing south (meta 3), the agent stands 1.5 blocks in front
 setblock -56 4 -237 agentcraftgtnh:monitor 3
 setblock -51 4 -237 agentcraftgtnh:monitor 3

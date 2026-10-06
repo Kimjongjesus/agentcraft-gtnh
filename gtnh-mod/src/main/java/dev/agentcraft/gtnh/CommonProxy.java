@@ -4,9 +4,12 @@ import dev.agentcraft.gtnh.block.BlockAgentCraft;
 import dev.agentcraft.gtnh.block.TileAgentCraft;
 import dev.agentcraft.gtnh.bridge.ForemanBridge;
 import dev.agentcraft.gtnh.command.CommandAgentCraft;
+import dev.agentcraft.gtnh.edit.PanelTypes;
 import dev.agentcraft.gtnh.entity.EntityHermesAgent;
+import dev.agentcraft.gtnh.item.ItemEditTool;
 import dev.agentcraft.gtnh.net.Net;
 import dev.agentcraft.gtnh.server.AgentWorldSync;
+import dev.agentcraft.gtnh.server.EditService;
 
 import cpw.mods.fml.common.FMLCommonHandler;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
@@ -21,6 +24,7 @@ public class CommonProxy {
     public static ForemanBridge bridge;
     public static AgentWorldSync sync;
     public static BlockAgentCraft monitor, lamp, beacon, taskWall, library, atrium;
+    public static ItemEditTool editTool;
 
     public void preInit(FMLPreInitializationEvent event) {
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
@@ -44,7 +48,23 @@ public class CommonProxy {
         GameRegistry.registerTileEntity(TileAgentCraft.TaskWall.class, AgentCraftGTNH.MODID + ".task_wall");
         GameRegistry.registerTileEntity(TileAgentCraft.Library.class, AgentCraftGTNH.MODID + ".library");
         GameRegistry.registerTileEntity(TileAgentCraft.Atrium.class, AgentCraftGTNH.MODID + ".goal_atrium");
+        // card 6: the office edit tool + the panel kinds it may place/remove (this mod's blocks only)
+        editTool = new ItemEditTool();
+        GameRegistry.registerItem(editTool, "edit_tool");
+        PanelTypes.registerBuiltins();
+        EditService.registerBlock("monitor", monitor);
+        EditService.registerBlock("status_lamp", lamp);
+        EditService.registerBlock("fleet_beacon", beacon);
+        EditService.registerBlock("task_wall", taskWall);
+        EditService.registerBlock("library", library);
+        EditService.registerBlock("goal_atrium", atrium);
     }
+
+    /** Client only (ClientProxy): edit tool right-click (hit = x, y, z, side of the block, or null for air). */
+    public void editToolUse(int[] hit, net.minecraft.entity.player.EntityPlayer player, boolean editMode) {}
+
+    /** Client only (ClientProxy): the edit tool's Panel Inspector for the panel at x, y, z. */
+    public void openInspector(int x, int y, int z) {}
 
     /** Client only (ClientProxy): open the read-only task wall / library / atrium screen. */
     public void openHqScreen(BlockAgentCraft.Kind kind, String binding) {}
@@ -64,11 +84,17 @@ public class CommonProxy {
         FMLCommonHandler.instance()
             .bus()
             .register(sync);
+        EditService.instance = new EditService();
+        FMLCommonHandler.instance()
+            .bus()
+            .register(EditService.instance);
+        net.minecraftforge.common.MinecraftForge.EVENT_BUS.register(EditService.instance);
     }
 
     public void serverStarting(FMLServerStartingEvent event) {
         event.registerServerCommand(new CommandAgentCraft());
         sync.reset();
+        EditService.instance.start(event.getServer());
         // dev/QA only (screenshots): -Dagentcraft.dev.noon freezes the overworld at noon
         if (System.getProperty("agentcraft.dev.noon") != null) {
             net.minecraft.world.WorldServer w = event.getServer()
@@ -92,5 +118,6 @@ public class CommonProxy {
             bridge = null;
         }
         sync.despawnAll();
+        EditService.instance.stop();
     }
 }
