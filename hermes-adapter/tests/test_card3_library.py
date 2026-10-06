@@ -110,6 +110,31 @@ class GoalTest(Card3Base):
         self.assertEqual(g2["total"], 7)
         self.assertFalse([m for m in msgs if m["type"] == "task.upsert"], "the old card was never on the wall")
 
+    def test_done_window_and_all_time_travel_together(self):
+        # card 4: ONE source of truth for the wall's Done column and the atrium ring. The goal says
+        # how many done cards the task list carries (doneRecent, the wall) and over how many days,
+        # beside the all-time count (counts.done, the ring); the wall's done cards match doneRecent.
+        for i in range(3):
+            self.f.task(f"t_old{i}", f"Game project: old level {i}", "done", "claude-builder")
+            self.f.sql("UPDATE tasks SET created_at=?, completed_at=? WHERE id=?",
+                       (self.now - 40 * 86400, self.now - 30 * 86400, f"t_old{i}"))
+        m = build(self.f.home)
+        (g,) = m["goals"]
+        wall_done = [t for t in m["tasks"] if t["status"] == "done" and t["board"] == "homelab"]
+        self.assertEqual(g["doneRecent"], len(wall_done))
+        self.assertEqual(g["doneRecent"], 1)
+        self.assertEqual(g["counts"]["done"], 4, "all time")
+        self.assertEqual(g["windowDays"], 3.0)
+        for col in ("todo", "doing", "review", "blocked"):
+            self.assertEqual(g["counts"][col], sum(1 for t in m["tasks"] if t["status"] == col and t["board"] == "homelab"),
+                             f"open column {col} = the wall's cards")
+        # a done card moving out of the window: doneRecent drops, all-time stays -> one goal.upsert
+        self.f.sql("UPDATE tasks SET completed_at=? WHERE status='done' AND id NOT LIKE 't_old%'", (self.now - 10 * 86400,))
+        msgs = AdapterServer.changes(m, build(self.f.home))
+        (g2,) = [x["goal"] for x in msgs if x["type"] == "goal.upsert"]
+        self.assertEqual((g2["doneRecent"], g2["counts"]["done"]), (0, 4))
+        self.assertNotIn("old level", json.dumps(m["goals"]), "goals carry counts only, never titles")
+
 
 class LibrarySourceTest(Card3Base):
     def test_sources_and_kinds(self):

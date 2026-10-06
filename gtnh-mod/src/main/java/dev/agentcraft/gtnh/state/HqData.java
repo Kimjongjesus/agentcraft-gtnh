@@ -133,13 +133,20 @@ public final class HqData {
         }
     }
 
-    /** One goal per Kanban board: progress, wall-column counts, open decision COUNT (no text). */
+    /**
+     * One goal per Kanban board: progress, wall-column counts, open decision COUNT (no text).
+     * Card 4: {@code counts[done]} is every done card ever (the ring, "all time"); {@code doneRecent}
+     * is the done cards the task list carries (the wall's Done column) over the last
+     * {@code windowDays} days (0 = no window: the list holds every done card). Wall and atrium both
+     * read their numbers from here, so they can never disagree silently.
+     */
     public static final class Goal {
 
         public String id = "", board = "", text = "", status = "active";
         public float progress;
         public final int[] counts = new int[COLUMNS.length];
-        public int total, openDecisions;
+        public int total, openDecisions, doneRecent;
+        public float windowDays;
         public long updatedAt;
 
         public static Goal fromJson(JsonObject o) {
@@ -166,6 +173,13 @@ public final class HqData {
             }
             g.total = Math.max(0, num(o, "total"));
             g.openDecisions = Math.max(0, num(o, "openDecisions"));
+            g.doneRecent = o.has("doneRecent") ? Math.max(0, num(o, "doneRecent")) : g.counts[3];
+            try {
+                g.windowDays = o.has("windowDays") ? Math.max(0.0F, Math.min(3650.0F, o.get("windowDays")
+                    .getAsFloat())) : 0.0F;
+            } catch (RuntimeException e) {
+                g.windowDays = 0.0F;
+            }
             g.updatedAt = lng(o, "updatedAt");
             return g;
         }
@@ -179,6 +193,8 @@ public final class HqData {
             for (int c : counts) out.writeInt(c);
             out.writeInt(total);
             out.writeInt(openDecisions);
+            out.writeInt(doneRecent);
+            out.writeFloat(windowDays);
             out.writeLong(updatedAt);
         }
 
@@ -192,6 +208,9 @@ public final class HqData {
             for (int i = 0; i < COLUMNS.length; i++) g.counts[i] = Math.max(0, in.readInt());
             g.total = Math.max(0, in.readInt());
             g.openDecisions = Math.max(0, in.readInt());
+            g.doneRecent = Math.max(0, in.readInt());
+            float w = in.readFloat();
+            g.windowDays = Float.isNaN(w) ? 0.0F : Math.max(0.0F, Math.min(3650.0F, w));
             g.updatedAt = in.readLong();
             return g;
         }
@@ -207,6 +226,8 @@ public final class HqData {
                 for (int i = 0; i < COLUMNS.length; i++) s.counts[i] += g.counts[i];
                 s.total += g.total;
                 s.openDecisions += g.openDecisions;
+                s.doneRecent += g.doneRecent;
+                s.windowDays = Math.max(s.windowDays, g.windowDays);
                 s.updatedAt = Math.max(s.updatedAt, g.updatedAt);
                 done += g.counts[3];
             }
@@ -265,7 +286,7 @@ public final class HqData {
 
     // ---- wire: board blob (tasks + goals) and library blob ---------------------------------
 
-    public static final int BOARD_VERSION = 1, LIBRARY_VERSION = 1;
+    public static final int BOARD_VERSION = 2, LIBRARY_VERSION = 1;
 
     public static void writeBoard(DataOutputStream out, List<Task> tasks, List<Goal> goals) throws IOException {
         out.writeByte(BOARD_VERSION);

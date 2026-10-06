@@ -56,28 +56,44 @@ public final class StationAssigner {
         /** personal | slot | fallback (lounge slot instead of a missing station) | hover | nearest */
         public final String mode;
         public final Anchor anchor;
-        /** Hover ring index (0 = the first spot next to the anchor); -1 when standing on the anchor. */
+        /** Fan index around the anchor (0 = the first extra spot); -1 when standing on the anchor. */
         public final int ring;
         public final String wantedStation;
+        /** Block offset of the fan cell from the anchor (0, 0 on the anchor). */
+        public final int dx, dz;
+        /**
+         * True when no free standable cell was found near the anchor, so this agent shares the
+         * anchor spot with others; the client then collapses their nameplates into one count pill.
+         */
+        public final boolean stacked;
 
         Target(String mode, Anchor anchor, int ring, String wantedStation) {
+            this(mode, anchor, ring, wantedStation, 0, 0, false);
+        }
+
+        Target(String mode, Anchor anchor, int ring, String wantedStation, int dx, int dz, boolean stacked) {
             this.mode = mode;
             this.anchor = anchor;
             this.ring = ring;
             this.wantedStation = wantedStation;
+            this.dx = dx;
+            this.dz = dz;
+            this.stacked = stacked;
         }
 
         public double x() {
-            return anchor.x + (ring < 0 ? 0 : ringOffset(ring)[0]);
+            return anchor.x + dx;
         }
 
         public double z() {
-            return anchor.z + (ring < 0 ? 0 : ringOffset(ring)[1]);
+            return anchor.z + dz;
         }
 
         public boolean sameSpot(Target o) {
             return o != null && o.anchor.name.equals(anchor.name)
                 && o.ring == ring
+                && o.dx == dx
+                && o.dz == dz
                 && o.anchor.x == anchor.x
                 && o.anchor.y == anchor.y
                 && o.anchor.z == anchor.z
@@ -89,6 +105,15 @@ public final class StationAssigner {
             return mode + ":" + anchor.name + (ring >= 0 ? "~" + ring : "");
         }
     }
+
+    /** Can an agent stand in this block (feet block coordinates)? Supplied by the server world. */
+    public interface Standable {
+
+        boolean ok(int bx, int by, int bz);
+    }
+
+    /** How far (blocks, Chebyshev) the fan looks for free cells around a full station. */
+    public static final int FAN_RADIUS = 6;
 
     private final Map<String, String> sticky = new HashMap<>();
     private final Set<String> warned = new HashSet<>();
@@ -125,13 +150,36 @@ public final class StationAssigner {
         return isStation(cut < 0 ? name : name.substring(0, cut));
     }
 
-    /** k-th hover position around an anchor: 8 per ring, rings 1.6 blocks apart. */
-    public static double[] ringOffset(int k) {
-        int ring = 1 + k / 8;
-        int dir = k % 8;
-        double r = 1.6 * ring;
-        double[][] d = { { 1, 0 }, { -1, 0 }, { 0, 1 }, { 0, -1 }, { 1, 1 }, { -1, 1 }, { 1, -1 }, { -1, -1 } };
-        return new double[] { d[dir][0] * r, d[dir][1] * r };
+    /**
+     * Candidate fan cells around an anchor, nearest first: block offsets (dx, dz) within
+     * {@link #FAN_RADIUS}, the 2-block lattice first (neighbours two blocks apart keep their
+     * nameplates apart), then the cells in between. Ties: cells in front of the anchor (its facing)
+     * first, then a fixed angular order, so the result is deterministic.
+     */
+    public static List<int[]> fanCells(Anchor a) {
+        List<int[]> cells = new ArrayList<>();
+        for (int dx = -FAN_RADIUS; dx <= FAN_RADIUS; dx++) {
+            for (int dz = -FAN_RADIUS; dz <= FAN_RADIUS; dz++) {
+                if (dx == 0 && dz == 0) continue;
+                cells.add(new int[] { dx, dz });
+            }
+        }
+        // facing vector from yaw (Minecraft: yaw 0 = south/+z, 90 = west/-x)
+        final double fx = -Math.sin(Math.toRadians(a.yaw)), fz = Math.cos(Math.toRadians(a.yaw));
+        Collections.sort(cells, (p, q) -> {
+            int lp = (p[0] % 2 == 0 && p[1] % 2 == 0) ? 0 : 1, lq = (q[0] % 2 == 0 && q[1] % 2 == 0) ? 0 : 1;
+            if (lp != lq) return lp - lq;
+            int dp = p[0] * p[0] + p[1] * p[1], dq = q[0] * q[0] + q[1] * q[1];
+            if (dp != dq) return dp - dq;
+            double fp = p[0] * fx + p[1] * fz, fq = q[0] * fx + q[1] * fz;
+            if (fp != fq) return fp > fq ? -1 : 1;
+            return Double.compare(Math.atan2(p[1], p[0]), Math.atan2(q[1], q[0]));
+        });
+        return cells;
+    }
+
+    private static long cellKey(int bx, int bz) {
+        return ((long) bx << 32) ^ (bz & 0xFFFFFFFFL);
     }
 
     public void forget(String agentId) {
@@ -143,6 +191,13 @@ public final class StationAssigner {
     }
 
     public Map<String, Target> assign(List<Want> wants, Map<String, Anchor> anchors) {
+        return assign(wants, anchors, null);
+    }
+
+    /**
+     * @param standable world check for fan cells (null = every cell is free, for plain-Java tests)
+     */
+    public Map<String, Target> assign(List<Want> wants, Map<String, Anchor> anchors, Standable standable) {
         newlyMissing.clear();
         // With no station anchors at all every station is "missing"; the caller logs that case once
         // itself. Do not mark stations as warned then, or the per-station warning would be used up
@@ -199,8 +254,15 @@ public final class StationAssigner {
                 taken.add(free.name);
             }
         }
-        // 5. hover around the station's first slot, else the lounge's, else the nearest anchor
+        // 5. fan out around the station's first slot, else the lounge's, else the nearest anchor:
+        // distinct free standable cells (never on another anchor or another agent's cell); only
+        // when none is left does an agent share the anchor spot (flagged "stacked").
+        Set<Long> occupied = new HashSet<>();
+        for (Anchor a : anchors.values()) {
+            if (isStandingAnchor(a.name)) occupied.add(cellKey(floor(a.x), floor(a.z)));
+        }
         Map<String, Integer> ringCount = new HashMap<>();
+        Map<String, Integer> scan = new HashMap<>(); // next candidate index per base anchor
         for (Want w : wants) {
             if (out.containsKey(w.agentId)) continue;
             String st = effectiveStation(w.station, w.active);
@@ -211,7 +273,24 @@ public final class StationAssigner {
             int k = ringCount.containsKey(base.name) ? ringCount.get(base.name) : 0;
             ringCount.put(base.name, k + 1);
             String mode = !own.isEmpty() || !lounge.isEmpty() ? "hover" : "nearest";
-            out.put(w.agentId, new Target(mode, base, k, st));
+            List<int[]> cells = fanCells(base);
+            int i = scan.containsKey(base.name) ? scan.get(base.name) : 0;
+            int bx = floor(base.x), by = floor(base.y), bz = floor(base.z);
+            int[] pick = null;
+            for (; i < cells.size(); i++) {
+                int[] c = cells.get(i);
+                long key = cellKey(bx + c[0], bz + c[1]);
+                if (occupied.contains(key)) continue;
+                if (standable != null && !standable.ok(bx + c[0], by, bz + c[1])) continue;
+                pick = c;
+                occupied.add(key);
+                i++;
+                break;
+            }
+            scan.put(base.name, i);
+            out.put(
+                w.agentId,
+                pick == null ? new Target(mode, base, k, st, 0, 0, true) : new Target(mode, base, k, st, pick[0], pick[1], false));
         }
         for (Map.Entry<String, Target> e : out.entrySet()) {
             if (e.getValue().ring < 0) sticky.put(e.getKey(), e.getValue().anchor.name);
@@ -222,6 +301,11 @@ public final class StationAssigner {
             if (!slots(st, anchors).isEmpty() || hasPersonalAnchors(st, anchors)) it.remove();
         }
         return out;
+    }
+
+    private static int floor(double d) {
+        int i = (int) d;
+        return d < i ? i - 1 : i;
     }
 
     private static boolean hasPersonalAnchors(String station, Map<String, Anchor> anchors) {

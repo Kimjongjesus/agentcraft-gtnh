@@ -79,7 +79,10 @@ EOF
     tail -n +"$((START + 1))" run/server-dev.log
     ;;
   stop)
-    if [ -p "$FIFO" ]; then echo "say devquit" > "$FIFO"; sleep 5; echo stop > "$FIFO"; fi
+    # only talk to the console while a server reads it: writing a FIFO nobody reads blocks forever
+    if [ -p "$FIFO" ] && [ -f run/server-gradle.pid ] && kill -0 "$(cat run/server-gradle.pid)" 2>/dev/null; then
+      echo "say devquit" > "$FIFO"; sleep 5; echo stop > "$FIFO"
+    fi
     for _ in $(seq 1 60); do
       [ -f run/server-gradle.pid ] && kill -0 "$(cat run/server-gradle.pid)" 2>/dev/null || break
       sleep 1

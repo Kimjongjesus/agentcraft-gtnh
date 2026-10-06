@@ -38,6 +38,57 @@ public class StationAssignerCheck {
         return new Want(id, station, active, 0, 64, 0);
     }
 
+    /**
+     * Card 4: 12 agents all waiting on Eli, two "user" slots in a nook whose first-ring spots are
+     * desks and whose back and sides are walls (the scene that stacked everyone on one spot): every
+     * agent gets its own standable cell, no two share a cell, nobody is on a desk or wall.
+     */
+    static void twelveWaiting() {
+        Map<String, Anchor> an = new HashMap<>();
+        an.put("user", new Anchor("user", -30.5, 4, -229.5, 90, 0)); // facing west
+        an.put("user_2", new Anchor("user_2", -31.5, 4, -228.5, 90, 0));
+        an.put("lounge", new Anchor("lounge", -56.5, 4, -222.5, 180, 0));
+        final java.util.Set<String> blocked = new java.util.HashSet<>();
+        int ax = -31, az = -230;
+        for (int dz = -5; dz <= 5; dz++) blocked.add((ax + 4) + "," + (az + dz)); // back wall
+        for (int dx = 0; dx < 4; dx++) {
+            blocked.add((ax + dx) + "," + (az - 5));
+            blocked.add((ax + dx) + "," + (az + 5));
+        }
+        int[][] desks = { { 2, 0 }, { -2, 0 }, { 0, 2 }, { 0, -2 }, { 2, 2 }, { -2, 2 }, { 2, -2 }, { -2, -2 } };
+        for (int[] d : desks) blocked.add((ax + d[0]) + "," + (az + d[1]));
+        StationAssigner.Standable ok = (bx, by, bz) -> !blocked.contains(bx + "," + bz);
+
+        StationAssigner sa = new StationAssigner();
+        List<Want> ws = new ArrayList<>();
+        for (int i = 0; i < 12; i++) ws.add(w("agent" + i, "user", true));
+        Map<String, Target> t = sa.assign(ws, an, ok);
+        eq(12, t.size(), "12 waiting agents placed");
+        java.util.Set<String> cells = new java.util.HashSet<>();
+        int onSlots = 0;
+        for (int i = 0; i < 12; i++) {
+            Target x = t.get("agent" + i);
+            eq("user", x.wantedStation, "agent" + i + " wants user");
+            eq(false, x.stacked, "agent" + i + " not stacked");
+            int bx = (int) Math.floor(x.x()), bz = (int) Math.floor(x.z());
+            eq(false, blocked.contains(bx + "," + bz), "agent" + i + " not in a desk or wall");
+            eq(true, cells.add(bx + "," + bz), "agent" + i + " has its own cell");
+            if (x.ring < 0) onSlots++;
+            else eq(true, Math.abs(x.dx) <= StationAssigner.FAN_RADIUS && Math.abs(x.dz) <= StationAssigner.FAN_RADIUS, "within the fan radius");
+        }
+        eq(2, onSlots, "two on the user slots");
+        eq(false, cells.contains("-57,-223"), "lounge anchor cell left free");
+        // stable: the same call again gives the same cells (no shuffling between ticks)
+        Map<String, Target> t2 = sa.assign(ws, an, ok);
+        for (int i = 0; i < 12; i++) eq(true, t.get("agent" + i).sameSpot(t2.get("agent" + i)), "stable cell " + i);
+
+        // nowhere to fan out at all: agents share the anchor, flagged stacked (client collapses plates)
+        Map<String, Target> t3 = new StationAssigner().assign(ws, an, (bx, by, bz) -> false);
+        int stacked = 0;
+        for (Target x : t3.values()) if (x.stacked) stacked++;
+        eq(10, stacked, "no free cell: 10 stacked, flagged");
+    }
+
     public static void main(String[] args) {
         // personal desk, shared library slots, lounge with two slots
         Map<String, Anchor> an = anchors("desk_opus", "desk", "library", "library_2", "lounge", "lounge_2", "cam_overview", "overflow_sign");
@@ -83,9 +134,17 @@ public class StationAssignerCheck {
         eq("hover:lounge~0", t.get("idle2").toString(), "hover 0");
         eq("hover:lounge~1", t.get("idle3").toString(), "hover 1");
         eq("hover:lounge~2", t.get("idle4").toString(), "hover 2");
-        double[] o0 = StationAssigner.ringOffset(0), o8 = StationAssigner.ringOffset(8);
-        eq(1.6, o0[0], "ring 1 radius");
-        eq(3.2, o8[0], "ring 2 radius");
+        // fan cells: distinct, never on an anchor, 2-block lattice first
+        java.util.Set<String> cells3 = new java.util.HashSet<>();
+        for (int i = 2; i < 5; i++) {
+            Target h = t.get("idle" + i);
+            eq(false, h.stacked, "fan cell found");
+            eq(0, Math.floorMod(h.dx, 2) + Math.floorMod(h.dz, 2), "lattice cell first");
+            cells3.add(h.x() + "," + h.z());
+        }
+        eq(3, cells3.size(), "three distinct fan cells");
+
+        twelveWaiting();
 
         // no lounge and no own station: nearest standing anchor (cam_/overflow ignored)
         Map<String, Anchor> only = new HashMap<>();

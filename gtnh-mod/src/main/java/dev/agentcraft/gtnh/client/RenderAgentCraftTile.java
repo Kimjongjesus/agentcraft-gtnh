@@ -1,12 +1,6 @@
 package dev.agentcraft.gtnh.client;
 
-import java.text.SimpleDateFormat;
-import java.util.ArrayList;
-import java.util.Date;
-import java.util.List;
-
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.entity.RenderManager;
@@ -22,8 +16,9 @@ import dev.agentcraft.gtnh.block.TileAgentCraft;
 import dev.agentcraft.gtnh.state.AgentInfo;
 import dev.agentcraft.gtnh.state.ClientAgentCache;
 import dev.agentcraft.gtnh.state.ClientHq;
-import dev.agentcraft.gtnh.state.HqData;
-import dev.agentcraft.gtnh.state.LogLine;
+import dev.agentcraft.gtnh.ui.Ui;
+import dev.agentcraft.gtnh.ui.UiFont;
+import dev.agentcraft.gtnh.ui.panel.InWorldPanels;
 
 /**
  * Client renderers for the HQ blocks, all fed by ClientAgentCache (which only changes when the server
@@ -38,8 +33,6 @@ import dev.agentcraft.gtnh.state.LogLine;
  */
 public class RenderAgentCraftTile extends TileEntitySpecialRenderer {
 
-    private static final int PX_PER_BLOCK = 80;
-    private final SimpleDateFormat hhmm = new SimpleDateFormat("HH:mm");
 
     @Override
     public void renderTileEntityAt(TileEntity te, double x, double y, double z, float partial) {
@@ -49,32 +42,34 @@ public class RenderAgentCraftTile extends TileEntitySpecialRenderer {
         double dx = te.xCoord + 0.5 - viewer.posX, dy = te.yCoord + 0.5 - viewer.posY, dz = te.zCoord + 0.5 - viewer.posZ;
         double distSq = dx * dx + dy * dy + dz * dz;
         TileAgentCraft t = (TileAgentCraft) te;
+        double dist = Math.sqrt(distSq);
         if (te.getBlockType() instanceof BlockAgentCraft) {
             switch (((BlockAgentCraft) te.getBlockType()).kind) {
                 case MONITOR:
-                    if (distSq <= sq(Config.monitorRenderDistance)) renderMonitor(t, x, y, z);
+                    if (distSq <= sq(Config.monitorRenderDistance)) InWorldPanels.render(t, "monitor", x, y, z, dist);
                     return;
                 case LAMP:
                     if (distSq <= sq(Config.monitorRenderDistance * 4)) renderShell(ClientAgentCache.familyFor(t.binding), x, y, z, 1.0F);
                     return;
                 case TASKWALL:
-                    if (distSq <= sq(Config.wallRenderDistance)) RenderHqTile.taskWall(func_147498_b(), t, x, y, z);
+                    if (distSq <= sq(Config.wallRenderDistance)) InWorldPanels.render(t, "task_wall", x, y, z, dist);
                     return;
                 case ATRIUM:
-                    if (distSq <= sq(Config.wallRenderDistance)) RenderHqTile.atrium(func_147498_b(), t, x, y, z);
+                    if (distSq <= sq(Config.wallRenderDistance)) InWorldPanels.render(t, "goal_atrium", x, y, z, dist);
                     return;
                 case LIBRARY:
-                    if (distSq <= 36.0D) renderLabel("Agent Library", "right-click to read", x + 0.5, y + 1.35, z + 0.5);
+                    if (distSq <= 64.0D) renderLabel("Agent Library", "right-click to read", 0xF4EFE6, x + 0.5, y + 1.4, z + 0.5);
                     return;
                 default:
                     renderBeacon(x, y, z);
                     if (distSq <= sq(Config.wallRenderDistance) && ClientAgentCache.linkUp && ClientHq.haveBoard) {
-                        HqData.Goal g = ClientHq.summary("");
+                        BoardView v = BoardView.of("");
                         renderLabel(
-                            g.counts[1] + " doing \u00b7 " + g.counts[2] + " review \u00b7 " + g.counts[4] + " blocked",
-                            g.openDecisions + (g.openDecisions == 1 ? " decision needs" : " decisions need") + " you",
+                            v.count(1) + " doing \u00b7 " + v.count(2) + " review \u00b7 " + v.count(4) + " blocked",
+                            v.goal.openDecisions + (v.goal.openDecisions == 1 ? " decision needs" : " decisions need") + " you",
+                            v.goal.openDecisions > 0 ? 0xEE9474 : 0xC4BAAC,
                             x + 0.5,
-                            y + 1.6,
+                            y + 1.7,
                             z + 0.5);
                     }
             }
@@ -85,123 +80,12 @@ public class RenderAgentCraftTile extends TileEntitySpecialRenderer {
         return d * d;
     }
 
-    // ---- monitor --------------------------------------------------------------------------
+    // ---- labels ---------------------------------------------------------------------------
 
-    private void renderMonitor(TileAgentCraft t, double x, double y, double z) {
-        int meta = t.getBlockMetadata();
-        float rot = meta == 2 ? 180.0F : meta == 4 ? -90.0F : meta == 5 ? 90.0F : 0.0F;
-        int wPx = t.screenW * PX_PER_BLOCK, hPx = t.screenH * PX_PER_BLOCK;
-        float s = 1.0F / PX_PER_BLOCK;
-
-        GL11.glPushMatrix();
-        GL11.glTranslated(x + 0.5, y + 0.5, z + 0.5);
-        GL11.glRotatef(rot, 0.0F, 1.0F, 0.0F);
-        // canvas: top-left corner of the screen, 0.01 in front of the block face, +x right, +y down
-        GL11.glTranslated(-t.screenW / 2.0, -0.5 + t.screenH, 0.512);
-        GL11.glScalef(s, -s, s);
-        GL11.glNormal3f(0.0F, 0.0F, 1.0F);
-        GL11.glDisable(GL11.GL_LIGHTING);
-        GL11.glDisable(GL11.GL_CULL_FACE);
-        OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, 240.0F, 240.0F);
-
-        String id = t.binding;
-        AgentInfo a = id.isEmpty() || "fleet".equals(id) ? null : ClientAgentCache.get(id);
-        int accent = a == null ? 0x4A4744 : a.color;
-        quad(-2, -2, wPx + 2, hPx + 2, 0xFF000000 | darken(accent), -0.2F);
-        quad(0, 0, wPx, hPx, 0xF0101418, -0.1F);
-
-        FontRenderer fr = func_147498_b();
-        GL11.glDepthMask(false);
-        int pad = 6, lineH = 10;
-        if (a == null) {
-            fr.drawString(id.isEmpty() ? "Agent monitor (unbound)" : "No agent '" + clip(fr, id, wPx - 2 * pad) + "'", pad, pad, 0xFFB0A898);
-            fr.drawString("Look at it: /agentcraft bind <agent>", pad, pad + lineH, 0xFF7C756B);
-        } else {
-            boolean link = ClientAgentCache.linkUp;
-            String fam = link ? a.family() : "offline";
-            int status = AgentInfo.familyColor(fam);
-            fr.drawString("\u25cf", pad, pad, 0xFF000000 | status);
-            fr.drawString("\u00a7l" + clip(fr, a.name, wPx / 2), pad + 9, pad, 0xFF000000 | lighten(a.color));
-            String st = link ? a.state.replace('_', ' ') + (a.waiting ? "  !" : "") : "adapter offline";
-            fr.drawString(st, wPx - pad - fr.getStringWidth(st), pad, 0xFF000000 | status);
-            fr.drawString(clip(fr, link ? a.activity : "Hermes adapter offline", wPx - 2 * pad), pad, pad + lineH + 1, 0xFFC8C0B4);
-            quad(pad, pad + 2 * lineH + 3, wPx - pad, pad + 2 * lineH + 4, 0x60FFFFFF, 0.0F);
-            int top = pad + 2 * lineH + 8;
-            int rows = Math.max(1, (hPx - top - pad) / lineH);
-            List<String[]> lines = wrapLogs(fr, ClientAgentCache.logs(a.id), wPx - 2 * pad);
-            int from = Math.max(0, lines.size() - rows);
-            for (int i = from; i < lines.size(); i++) {
-                fr.drawString(lines.get(i)[1], pad, top + (i - from) * lineH, 0xFF000000 | Integer.parseInt(lines.get(i)[0]));
-            }
-            if (lines.isEmpty()) fr.drawString("(no recent log lines)", pad, top, 0xFF7C756B);
-        }
-        GL11.glDepthMask(true);
-        GL11.glEnable(GL11.GL_CULL_FACE);
-        GL11.glEnable(GL11.GL_LIGHTING);
-        GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-        GL11.glPopMatrix();
-    }
-
-    /** [colour, text] display rows: "HH:mm " prefix on the first row of each entry, wrapped to width. */
-    private List<String[]> wrapLogs(FontRenderer fr, List<LogLine> logs, int width) {
-        List<String[]> out = new ArrayList<>();
-        for (LogLine l : logs) {
-            int c = kindColor(l.kind);
-            String prefix = l.ts > 0 ? hhmm.format(new Date(l.ts)) + " " : "";
-            boolean first = true;
-            for (String para : l.text.split("\n")) {
-                if (para.trim()
-                    .isEmpty()) continue;
-                @SuppressWarnings("unchecked")
-                List<String> wrapped = fr.listFormattedStringToWidth((first ? prefix : "      ") + para, width);
-                for (String w : wrapped) out.add(new String[] { Integer.toString(c), w });
-                first = false;
-            }
-        }
-        return out;
-    }
-
-    private static int kindColor(String kind) {
-        switch (kind) {
-            case "tool":
-                return 0x5FC4C0;
-            case "result":
-                return 0x9CC59A;
-            case "error":
-                return 0xE0605A;
-            case "diff":
-                return 0xC9A227;
-            default:
-                return 0xD8D2C8;
-        }
-    }
-
-    private static String clip(FontRenderer fr, String s, int width) {
-        if (fr.getStringWidth(s) <= width) return s;
-        return fr.trimStringToWidth(s, width - fr.getStringWidth("...")) + "...";
-    }
-
-    private static void quad(double x0, double y0, double x1, double y1, int argb, float z) {
-        Tessellator t = Tessellator.instance;
-        GL11.glDisable(GL11.GL_TEXTURE_2D);
-        GL11.glEnable(GL11.GL_BLEND);
-        OpenGlHelper.glBlendFunc(770, 771, 1, 0);
-        t.startDrawingQuads();
-        t.setColorRGBA((argb >> 16) & 0xFF, (argb >> 8) & 0xFF, argb & 0xFF, (argb >>> 24) & 0xFF);
-        t.addVertex(x0, y1, z);
-        t.addVertex(x1, y1, z);
-        t.addVertex(x1, y0, z);
-        t.addVertex(x0, y0, z);
-        t.draw();
-        GL11.glEnable(GL11.GL_TEXTURE_2D);
-    }
-
-    // ---- lamp / beacon --------------------------------------------------------------------
-
-    /** Two-line billboard label (faces the camera like a nameplate), e.g. the beacon's board summary. */
-    private void renderLabel(String line1, String line2, double x, double y, double z) {
-        FontRenderer fr = func_147498_b();
-        float s = 0.022F;
+    /** Two-line billboard label (faces the camera like a nameplate) in the UI font. */
+    private void renderLabel(String line1, String line2, int color2, double x, double y, double z) {
+        UiFont bold = UiFont.bold(), reg = UiFont.regular();
+        float s = 0.011F, size = 18.0F; // 18 units * 0.011 = an em of 0.2 block
         GL11.glPushMatrix();
         GL11.glTranslated(x, y, z);
         GL11.glNormal3f(0.0F, 1.0F, 0.0F);
@@ -209,13 +93,16 @@ public class RenderAgentCraftTile extends TileEntitySpecialRenderer {
         GL11.glRotatef(RenderManager.instance.playerViewX, 1.0F, 0.0F, 0.0F);
         GL11.glScalef(-s, -s, s);
         GL11.glDisable(GL11.GL_LIGHTING);
+        GL11.glDisable(GL11.GL_CULL_FACE);
         OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, 240.0F, 240.0F);
-        int w = Math.max(fr.getStringWidth(line1), fr.getStringWidth(line2)) / 2;
+        float w = Math.max(bold.width(line1, size), reg.width(line2, size * 0.9F)) / 2;
+        float lh = bold.lineHeight(size);
         GL11.glDepthMask(false);
-        quad(-w - 3, -2, w + 3, 19, 0x90000000, 0.0F);
-        fr.drawString(line1, -fr.getStringWidth(line1) / 2, 0, 0xFFF4EFE6);
-        fr.drawString(line2, -fr.getStringWidth(line2) / 2, 10, 0xFFD97757);
+        Ui.round(-w - 8, -5, w + 8, lh * 1.95F + 5, 9, 0xC81C1815);
+        bold.drawCentered(line1, 0, 0, size, 0xFFF4EFE6);
+        reg.drawCentered(line2, 0, lh, size * 0.9F, 0xFF000000 | color2);
         GL11.glDepthMask(true);
+        GL11.glEnable(GL11.GL_CULL_FACE);
         GL11.glEnable(GL11.GL_LIGHTING);
         GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
         GL11.glPopMatrix();

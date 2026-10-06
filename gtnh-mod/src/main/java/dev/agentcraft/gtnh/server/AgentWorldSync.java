@@ -432,7 +432,7 @@ public final class AgentWorldSync {
                     alive ? ent.posY : spawn.posY,
                     alive ? ent.posZ : spawn.posZ));
         }
-        targets = assigner.assign(wants, anchors.all());
+        targets = assigner.assign(wants, anchors.all(), (bx, by, bz) -> standable(world, bx + 0.5, by, bz + 0.5));
         if (anchors.isEmpty()) {
             if (!noAnchorsLogged) {
                 noAnchorsLogged = true;
@@ -511,11 +511,11 @@ public final class AgentWorldSync {
         }
     }
 
-    /** x, y, z, yaw for a target; a hover spot that is not standable falls back to the anchor itself. */
+    /** x, y, z, yaw for a target; fan cells were checked by the assigner (stacked = the anchor itself). */
     private double[] safeSpot(WorldServer world, StationAssigner.Target t) {
         Anchor a = t.anchor;
         double x = t.x(), y = a.y, z = t.z();
-        if (t.ring >= 0 && !standable(world, x, y, z)) {
+        if (t.ring >= 0 && !t.stacked && !standable(world, x, y, z)) {
             x = a.x;
             z = a.z;
         }

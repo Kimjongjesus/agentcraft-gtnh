@@ -111,8 +111,14 @@ match wins:
 3. the first free slot of the station.
 
 Missing anchors: a station with **no anchor at all** is logged once (`no anchor for station
-'testbench': ...`) and its agents take a free lounge slot. Agents left without a slot hover in a
-small ring next to the station's first slot, else the lounge's, else the nearest configured anchor.
+'testbench': ...`) and its agents take a free lounge slot. Agents left without a slot (for example
+twelve agents all waiting at a `user` station with two slots) **fan out** (card 4) over distinct
+free standable cells within `FAN_RADIUS` (6) blocks of the station's first slot, else the lounge's,
+else the nearest configured anchor: the two-block lattice first (so neighbours' nameplates stay
+apart), cells in front of the anchor before the ones behind it, never on another anchor or another
+agent's cell, the same cell again on the next tick. Only when no free cell is left does an agent
+share the anchor spot; the client then collapses those plates into one with a "+N here" pill
+(section 5). Checked by `StationAssignerCheck` (12 agents waiting, walled-in nook, determinism).
 NPCs never roam: they only walk to their target, and an NPC with no path, no progress for
 `teleportAfterSeconds`, a fall below its spot, or a target more than 48 blocks away is put on the
 spot. With no anchors at all the NPCs stand in a row next to the world spawn (card-1 behaviour).
@@ -153,8 +159,8 @@ Three more blocks in the Decorations tab (or `/agentcraft give taskwall|library|
 
 | block | bind to | shows |
 |---|---|---|
-| **Task Wall** (faces you) | a board slug, or `all` (default) | the Kanban as five columns `todo / doing / review / done / blocked` (cancelled hidden; the adapter maps Hermes `triage`/`ready` to todo and `running` to doing). Each card: title (two lines, truncated), assignee in its agent colour, priority hint `P80`, `→N` when it depends on N cards. A column with more cards than fit flips pages every `wallPageSeconds`. |
-| **Goal Atrium** (faces you) | a board slug, or `all` | a progress ring (done / total of that board), counts of todo, doing, review and blocked, and "N decisions need you" (count only). |
+| **Task Wall** (faces you) | a board slug, or `all` (default) | the Kanban as five columns `todo / doing / review / done / blocked` (cancelled hidden; the adapter maps Hermes `triage`/`ready` to todo and `running` to doing). Each card: the full title wrapped by pixel width (up to three lines, only the last one ellipsized), assignee in its agent colour, a priority pill. The Done column is labelled with its window ("last 3 days"). A column with more cards than fit flips pages every `wallPageSeconds`. Level of detail by distance: see section 5. |
+| **Goal Atrium** (faces you) | a board slug, or `all` | a progress ring (done / total of that board, labelled "all time"), counts of todo, doing, review and blocked, "N done in the last 3 days" (the same number as the wall's Done column) and "N decisions need you" (count only). |
 | **Agent Library** | a board slug, or `all` | a book block; the screen lists the library notes (below). |
 
 Right-click any of them for its screen. The **task wall screen** lists every card with column filter
@@ -195,6 +201,78 @@ first), 16 goals and 64 notes, and sends two binary blobs (board, library) over 
 `agentcraftgtnh` channel in 30 kB parts, at most once per `boardSyncSeconds` (2) and only when the
 bytes changed; a blob is capped at 512 kB. Players who log in get the current blobs. The client
 (`state/ClientHq`) only reads them; the screens keep scroll and filter state locally.
+
+### 5. UI toolkit, panels and the office layout (card 4)
+
+Every screen and in-world panel is drawn with one toolkit (`ui/`), in the bundled fonts instead of
+the Minecraft font:
+
+- **Fonts** (`assets/agentcraftgtnh/fonts/`, SIL Open Font License 1.1, licence texts next to the
+  files): Nunito Regular, Bold and ExtraBold for everything, JetBrains Mono for log lines and ids.
+  `UiFont` rasterizes the .ttf once with `java.awt` (only `Font`, `BufferedImage`, `Graphics2D`:
+  the headless-safe part of AWT, no windows or `Toolkit`) at 64 px per em into a mipmapped alpha
+  atlas and draws glyph quads at any size, so text is crisp up close and does not shimmer far away.
+  If AWT cannot load a font, the same API falls back to the vanilla font, so a screen never breaks.
+  Java support: verified on the plain Forge client (Java 8). GTNH 2.9.x runs on Java 17+ through
+  lwjgl3ify; those runtimes ship `java.desktop` (the module with `Font`, `BufferedImage`,
+  `Graphics2D`), and only AWT windowing/`Toolkit` clashes with LWJGL3's GLFW (notably on macOS),
+  which `UiFont` never touches. The GTNH client render itself is not verified yet (card 4).
+- **Theme** (`Theme`, pure Java): a dark walnut theme with cream text and paper cards (default) and
+  a light one. Body text is at least 4.5:1 contrast, headlines 3:1 (WCAG AA); agent and status
+  colours from the adapter go through `Theme.readable` until they meet 4.5:1 on their background.
+- **Text layout** (`TextLayout`, pure Java): wraps and ellipsizes by pixel width, never by a
+  character count. The full title is always in the detail view.
+- **Primitives and widgets** (`Ui`, `Widgets`): segmented panels, cards, status pills, progress
+  ring, buttons, tabs, scroll lists, a search field, tooltips. GUI sizes follow the GUI scale.
+- **Nameplates** (`client/PlateLayout`, `ui/PlateDeclutter`): agents on the same spot collapse into
+  one plate with a "+N here" pill; the others are laid out in screen space so they never cover one
+  another: the plate under the crosshair and the nearest keep their spot, farther ones shrink (name
+  and state, then name only) or rise a tier, and only as a last resort become their bare `!` or
+  status dot. Look at an agent to read its full plate. Checked by `dev/tests/PlateLayoutCheck`.
+
+**Panels.** An in-world screen is a *panel type* (`ui/panel/PanelRenderer`) registered by id in
+`PanelRegistry`, reading a *data source* registered there too:
+
+| panel id | source (binding) | block | detail by distance |
+|---|---|---|---|
+| `kanban` | `board` (slug or `all`) | Task Wall | near: cards with three-line titles, assignee, priority; mid: two-line titles, larger counts; far: column names and big counts |
+| `goal` | `board` | Goal Atrium | near: ring "all time", open counts, "N done in the last 3 days", decisions; far: big percentage and decisions |
+| `agent-monitor` | `agent` (agent id) | Monitor | near: header strip, activity, log tail in mono; mid: name, state, activity big; far: name and state |
+
+The level of detail comes from the on-screen size of one block (pixels per block for the current
+window height, FOV and distance) against `lod.nearPx` / `lod.midPx`, with a 10 % band so it does not
+flicker at a threshold. Each panel is drawn at `pxPerBlock` canvas units per block.
+
+**Layout file.** `config/agentcraftgtnh/office-layout.json` (client; written with the defaults on
+first start, re-read a few seconds after a hand edit) says which panel each block kind shows, its
+theme and resolution, the detail thresholds and optional per-block overrides:
+
+```json
+{
+  "version": 1,
+  "theme": "dark",
+  "lod": {"nearPx": 110, "midPx": 85},
+  "blocks": {
+    "task_wall":   {"panel": "kanban",        "pxPerBlock": 128},
+    "goal_atrium": {"panel": "goal",          "pxPerBlock": 128},
+    "monitor":     {"panel": "agent-monitor", "pxPerBlock": 128}
+  },
+  "instances": {"0:-72,4,-221": {"panel": "goal", "theme": "light"}}
+}
+```
+
+Extension points (used by later cards; nothing else has to change):
+
+1. a new panel type: implement `PanelRenderer` (id, source, `render(PanelContext)`), call
+   `PanelRegistry.register` in `ClientProxy`, name it in the layout file;
+2. a new data source: `PanelRegistry.registerSource("id", binding -> data)`;
+3. the in-game edit tool (card 6) writes the same layout file; presets are copies of it.
+
+**One count, two windows.** The adapter sends every done card ever as the goal's `counts.done`
+(the ring, "all time") and the done cards inside its task window as `doneRecent` with `windowDays`
+(the wall's Done column, "last 3 days"). Wall, atrium, beacon label and task wall screen all read
+these from `client/BoardView`, so they cannot disagree; the screen's Done filter explains the two
+numbers. Older adapters without `doneRecent` fall back to the list count.
 
 ### Other commands
 

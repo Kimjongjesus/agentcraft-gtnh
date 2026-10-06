@@ -58,7 +58,8 @@ class BoardData:
     # every done card on the board, also the ones older than the task window (a COUNT only; the
     # goal progress ring). None = the source has no separate count (cli: it already reads them all)
     done_total: int | None = None
-
+    # days of done cards the task list carries (the wall's "Done" column); 0 = no window
+    window_days: float = 0.0
 
 @dataclass
 class HermesData:
@@ -108,7 +109,7 @@ class HermesSource:
         return [b for b in found if "scratch" not in b]
 
     def _read_board_sqlite(self, slug: str, now: float) -> BoardData:
-        bd = BoardData(slug=slug)
+        bd = BoardData(slug=slug, window_days=self.task_window_days)
         path = self.home / "kanban" / "boards" / slug / "kanban.db"
         since = int(now - self.task_window_days * 86400)
         conn = _ro_connect(path)

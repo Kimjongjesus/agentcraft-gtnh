@@ -6,17 +6,25 @@ import net.minecraftforge.common.MinecraftForge;
 import dev.agentcraft.gtnh.block.BlockAgentCraft;
 import dev.agentcraft.gtnh.block.TileAgentCraft;
 import dev.agentcraft.gtnh.client.AnchorOverlayRenderer;
+import dev.agentcraft.gtnh.client.BoardView;
 import dev.agentcraft.gtnh.client.DevShots;
 import dev.agentcraft.gtnh.client.GuiLibrary;
 import dev.agentcraft.gtnh.client.GuiTaskWall;
 import dev.agentcraft.gtnh.client.RenderAgentCraftTile;
 import dev.agentcraft.gtnh.client.RenderHermesAgent;
+import dev.agentcraft.gtnh.client.panels.GoalPanel;
+import dev.agentcraft.gtnh.client.panels.KanbanPanel;
+import dev.agentcraft.gtnh.client.panels.MonitorPanel;
 import dev.agentcraft.gtnh.entity.EntityHermesAgent;
+import dev.agentcraft.gtnh.state.ClientAgentCache;
 import dev.agentcraft.gtnh.state.ClientHq;
+import dev.agentcraft.gtnh.ui.panel.PanelLayout;
+import dev.agentcraft.gtnh.ui.panel.PanelRegistry;
 
 import cpw.mods.fml.client.registry.ClientRegistry;
 import cpw.mods.fml.client.registry.RenderingRegistry;
 import cpw.mods.fml.common.FMLCommonHandler;
+import cpw.mods.fml.common.Loader;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.network.FMLNetworkEvent;
@@ -26,6 +34,16 @@ public class ClientProxy extends CommonProxy {
     @Override
     public void init(FMLInitializationEvent event) {
         super.init(event);
+        // card 4: modular in-world panels (type id -> renderer, source id -> data) + the layout file
+        PanelRegistry.registerSource("board", BoardView::of);
+        PanelRegistry.registerSource(
+            "agent",
+            b -> b == null || b.isEmpty() || "fleet".equals(b) ? null : ClientAgentCache.get(b));
+        PanelRegistry.register(new KanbanPanel());
+        PanelRegistry.register(new GoalPanel());
+        PanelRegistry.register(new MonitorPanel());
+        PanelLayout.init(Loader.instance()
+            .getConfigDir());
         RenderingRegistry.registerEntityRenderingHandler(EntityHermesAgent.class, new RenderHermesAgent());
         RenderAgentCraftTile tiles = new RenderAgentCraftTile();
         ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.Monitor.class, tiles);

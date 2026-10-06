@@ -1,9 +1,7 @@
 package dev.agentcraft.gtnh.client;
 
-import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.model.ModelBiped;
 import net.minecraft.client.renderer.OpenGlHelper;
-import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.entity.RenderBiped;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLiving;
@@ -15,6 +13,11 @@ import org.lwjgl.opengl.GL11;
 import dev.agentcraft.gtnh.entity.EntityHermesAgent;
 import dev.agentcraft.gtnh.state.AgentInfo;
 import dev.agentcraft.gtnh.state.ClientAgentCache;
+import dev.agentcraft.gtnh.ui.PlateDeclutter;
+import dev.agentcraft.gtnh.ui.TextLayout;
+import dev.agentcraft.gtnh.ui.Theme;
+import dev.agentcraft.gtnh.ui.Ui;
+import dev.agentcraft.gtnh.ui.UiFont;
 
 /**
  * Biped NPC (Steve skin; the outfit is dyed armour in the agent colour, a gold helmet for the lead,
@@ -26,6 +29,10 @@ public class RenderHermesAgent extends RenderBiped {
 
     private static final ResourceLocation STEVE = new ResourceLocation("textures/entity/steve.png");
     private static final double PLATE_RANGE_SQ = 48.0D * 48.0D;
+    /** Plate pixels -> blocks; name and state text sizes; max text row width (plate pixels). */
+    static final float SCALE = 0.0125F, NS = 16, SS = 12.5F, MAX_W = 230;
+    /** How far the "!" badge reaches left of the plate (plate pixels); marker-only radius. */
+    static final float BADGE_REACH = 34, DOT_R = 20;
 
     public RenderHermesAgent() {
         super(new ModelBiped(), 0.5F);
@@ -41,43 +48,103 @@ public class RenderHermesAgent extends RenderBiped {
         return STEVE;
     }
 
+    /** What a plate says (from the network cache, else the entity's DataWatcher). */
+    private static final class PlateText {
+
+        String name, state, line2;
+        int statusColor, color;
+        boolean lead;
+    }
+
+    private static PlateText text(EntityHermesAgent e) {
+        AgentInfo a = ClientAgentCache.forEntity(e.getEntityId());
+        PlateText p = new PlateText();
+        String activity;
+        boolean active;
+        if (a != null) {
+            p.name = a.name;
+            p.state = a.state;
+            activity = a.activity;
+            p.color = a.color;
+            active = a.active;
+        } else {
+            String custom = e.getCustomNameTag();
+            int cut = custom.indexOf(" \u00a7");
+            p.name = cut > 0 ? custom.substring(0, cut) : (custom.isEmpty() ? e.getAgentId() : custom);
+            p.state = e.getAgentState();
+            activity = e.getAgentActivity();
+            p.color = e.getAgentColor();
+            active = true;
+        }
+        String family = a != null ? a.family() : AgentInfo.family(p.state, active);
+        p.statusColor = AgentInfo.familyColor(family);
+        p.state = p.state.replace('_', ' ');
+        p.line2 = p.state + (activity.isEmpty() ? "" : " \u00b7 " + activity);
+        p.lead = a != null && "lead".equals(a.role);
+        return p;
+    }
+
+    /** Plate geometry in plate pixels for a mode: {w1 (name row), w2 (state row), half width, height}. */
+    private static float[] metrics(PlateText t, int groupSize, int mode) {
+        if (mode == PlateDeclutter.DOT) return new float[] { 0, 0, DOT_R, DOT_R * 2 };
+        UiFont bold = UiFont.bold(), reg = UiFont.regular();
+        String extra = groupSize > 1 ? "+" + (groupSize - 1) + " here" : "";
+        float extraW = extra.isEmpty() ? 0 : reg.width(extra, SS) + SS * 1.1F + 5;
+        float dot = NS * 0.24F;
+        String n1 = TextLayout.ellipsize(t.name, MAX_W - dot * 3 - extraW, bold.measure(NS));
+        float w1 = dot * 3 + bold.width(n1, NS) + extraW, w2 = 0;
+        float h = bold.lineHeight(NS) + 6;
+        if (mode != PlateDeclutter.MINI) {
+            String n2 = TextLayout.ellipsize(row2(t, mode), MAX_W, reg.measure(SS));
+            w2 = reg.width(n2, SS);
+            h += reg.lineHeight(SS);
+        }
+        float half = Math.max(w1, w2) / 2 + 7;
+        return new float[] { w1, w2, half, h };
+    }
+
+    private static String row2(PlateText t, int mode) {
+        return mode == PlateDeclutter.FULL ? t.line2 : t.state;
+    }
+
+    private static float base(EntityHermesAgent e, boolean lead) {
+        return e.height + (lead ? 0.95F : 0.78F);
+    }
+
+    private static final PlateLayout.Sizer SIZER = new PlateLayout.Sizer() {
+
+        @Override
+        public float[][] size(EntityHermesAgent e, PlateLayout.Info i) {
+            PlateText t = text(e);
+            float[][] out = new float[3][PlateDeclutter.MODES];
+            for (int m = 0; m < PlateDeclutter.MODES; m++) {
+                float[] g = metrics(t, i.groupSize, m);
+                float badge = i.waiting > 0 && m != PlateDeclutter.DOT ? BADGE_REACH : 0;
+                out[0][m] = (g[2] + badge) * SCALE;
+                out[1][m] = g[2] * SCALE;
+                out[2][m] = g[3] * SCALE;
+            }
+            return out;
+        }
+
+        @Override
+        public float base(EntityHermesAgent e) {
+            AgentInfo a = ClientAgentCache.forEntity(e.getEntityId());
+            return RenderHermesAgent.base(e, a != null && "lead".equals(a.role));
+        }
+    };
+
     @Override
     protected void passSpecialRender(EntityLivingBase living, double x, double y, double z) {
         if (!(living instanceof EntityHermesAgent)) return;
         EntityHermesAgent e = (EntityHermesAgent) living;
         if (e.getDistanceSqToEntity(renderManager.livingPlayer) > PLATE_RANGE_SQ) return;
 
-        AgentInfo a = ClientAgentCache.forEntity(e.getEntityId());
-        String name, state, activity;
-        int color;
-        boolean active;
-        if (a != null) {
-            name = a.name;
-            state = a.state;
-            activity = a.activity;
-            color = a.color;
-            active = a.active;
-        } else {
-            String custom = e.getCustomNameTag();
-            int cut = custom.indexOf(" \u00a7");
-            name = cut > 0 ? custom.substring(0, cut) : (custom.isEmpty() ? e.getAgentId() : custom);
-            state = e.getAgentState();
-            activity = e.getAgentActivity();
-            color = e.getAgentColor();
-            active = true;
-        }
-        String family = a != null ? a.family() : AgentInfo.family(state, active);
-        int statusColor = AgentInfo.familyColor(family);
-        String line2 = state.replace('_', ' ') + (activity.isEmpty() ? "" : " \u00b7 " + activity);
-
-        float top = living.height + ("lead".equals(a != null ? a.role : "") ? 0.95F : 0.75F);
-        drawPlate(name, "\u25cf ", statusColor, color, x, y + top, z, true);
-        drawPlate(line2, "", statusColor, statusColor, x, y + top - 0.27F, z, false);
-        if (a != null && a.waiting && ClientAgentCache.linkUp) {
-            // decision / permission marker: a bobbing "!" above the plate (display only, answered in Hermes)
-            double bob = Math.sin((System.currentTimeMillis() % 1600L) / 1600.0D * Math.PI * 2) * 0.06D;
-            drawMarker(x, y + top + 0.42F + bob, z);
-        }
+        PlateLayout.Info pl = PlateLayout.of(e, SIZER);
+        if (pl.hidden) return; // shares a spot with another agent: that agent's plate shows "+N here"
+        PlateText t = text(e);
+        float top = base(e, t.lead) + pl.tier * PlateLayout.TIER_STEP;
+        drawPlate(t, pl.mode, pl.groupSize, pl.waiting, x, y + top, z);
     }
 
     @Override
@@ -86,10 +153,7 @@ public class RenderHermesAgent extends RenderBiped {
         if (a != null && "lead".equals(a.role)) GL11.glScalef(1.1F, 1.1F, 1.1F); // the lead stands a little taller
     }
 
-    /** Big clay-coloured "!" in a dark circle, billboarded, visible through walls. */
-    private void drawMarker(double x, double y, double z) {
-        FontRenderer fr = getFontRendererFromRenderManager();
-        float scale = 0.016666668F * 4.0F;
+    private void billboard(double x, double y, double z, float scale) {
         GL11.glPushMatrix();
         GL11.glTranslatef((float) x, (float) y, (float) z);
         GL11.glNormal3f(0.0F, 1.0F, 0.0F);
@@ -97,89 +161,85 @@ public class RenderHermesAgent extends RenderBiped {
         GL11.glRotatef(renderManager.playerViewX, 1.0F, 0.0F, 0.0F);
         GL11.glScalef(-scale, -scale, scale);
         GL11.glDisable(GL11.GL_LIGHTING);
-        GL11.glDepthMask(false);
-        GL11.glDisable(GL11.GL_DEPTH_TEST);
-        GL11.glEnable(GL11.GL_BLEND);
-        OpenGlHelper.glBlendFunc(770, 771, 1, 0);
-        Tessellator t = Tessellator.instance;
-        GL11.glDisable(GL11.GL_TEXTURE_2D);
         GL11.glDisable(GL11.GL_CULL_FACE);
-        t.startDrawing(GL11.GL_TRIANGLE_FAN);
-        t.setColorRGBA_F(0.85F, 0.47F, 0.34F, 0.95F);
-        t.addVertex(0.0D, 3.5D, 0.0D);
-        for (int i = 0; i <= 20; i++) {
-            double ang = i / 20.0D * Math.PI * 2;
-            t.addVertex(Math.cos(ang) * 6.0D, 3.5D + Math.sin(ang) * 6.0D, 0.0D);
-        }
-        t.draw();
-        GL11.glEnable(GL11.GL_CULL_FACE);
-        GL11.glEnable(GL11.GL_TEXTURE_2D);
-        int w = fr.getStringWidth("!");
-        fr.drawString("\u00a7l!", -w / 2 - 1, 0, 0xFFFFFFFF);
+        OpenGlHelper.setLightmapTextureCoords(OpenGlHelper.lightmapTexUnit, 240.0F, 240.0F);
+    }
+
+    private void endBillboard() {
         GL11.glEnable(GL11.GL_DEPTH_TEST);
         GL11.glDepthMask(true);
-        fr.drawString("\u00a7l!", -w / 2 - 1, 0, 0xFFFFFFFF);
+        GL11.glEnable(GL11.GL_CULL_FACE);
         GL11.glEnable(GL11.GL_LIGHTING);
+        GL11.glEnable(GL11.GL_TEXTURE_2D);
         GL11.glDisable(GL11.GL_BLEND);
         GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
         GL11.glPopMatrix();
     }
 
-    /** Billboarded text pill, like vanilla's label but with a coloured prefix and opaque-ish background. */
-    private void drawPlate(String text, String prefix, int prefixColor, int textColor, double x, double y, double z,
-        boolean bold) {
-        FontRenderer fr = getFontRendererFromRenderManager();
-        float scale = 0.016666668F * 1.6F;
-        String main = bold ? "\u00a7l" + text : text;
-        int wPrefix = fr.getStringWidth(prefix);
-        int width = wPrefix + fr.getStringWidth(main);
-        int half = width / 2;
+    /**
+     * The "waiting on Eli" badge: a big white "!" in a clay disc at the plate's left edge (beside the
+     * plate, not above it, so stacked plates of neighbours never cover it), pulsing, with the number
+     * of waiting agents when several share the spot. Display only; decisions are answered in Hermes.
+     */
+    private void drawBadge(float cx, float cy, int count) {
+        UiFont heavy = UiFont.heavy(), bold = UiFont.bold();
+        double t = (System.currentTimeMillis() % 1600L) / 1600.0D;
+        float k = (float) (0.5 + 0.5 * Math.sin(t * Math.PI * 2));
+        float r = 15 + 1.5F * k;
+        Ui.dot(cx, cy, r + 2.5, 0xF01C1815);
+        Ui.dot(cx, cy, r, 0xFF000000 | Theme.mix(0xD97757, 0xEE9474, k));
+        float s = 25;
+        heavy.drawCentered("!", cx, cy - heavy.lineHeight(s) * 0.5F, s, 0xFFFFFFFF);
+        if (count > 1) Ui.pill(bold, String.valueOf(count), cx + r * 0.35F, cy - r - 9, 13, 0xF4EFE6);
+    }
 
-        GL11.glPushMatrix();
-        GL11.glTranslatef((float) x, (float) y, (float) z);
-        GL11.glNormal3f(0.0F, 1.0F, 0.0F);
-        GL11.glRotatef(-renderManager.playerViewY, 0.0F, 1.0F, 0.0F);
-        GL11.glRotatef(renderManager.playerViewX, 1.0F, 0.0F, 0.0F);
-        GL11.glScalef(-scale, -scale, scale);
-        GL11.glDisable(GL11.GL_LIGHTING);
+    /**
+     * Billboarded plate in the UI font: status dot + name (agent colour) and, below, "state ·
+     * activity" (full) or the state (compact) in the status colour, ellipsized by width; name only
+     * (mini); or just the marker (dot). "+N here" when agents share this spot. A faint pass shows
+     * through walls, the full pass is depth-tested.
+     */
+    private void drawPlate(PlateText t, int mode, int groupSize, int waiting, double x, double y, double z) {
+        UiFont bold = UiFont.bold(), reg = UiFont.regular();
+        final int bg = 0x1C1815;
+        float ns = NS, ss = SS;
+        int statusColor = t.statusColor;
+        billboard(x, y, z, SCALE);
         GL11.glDepthMask(false);
         GL11.glDisable(GL11.GL_DEPTH_TEST);
-        GL11.glEnable(GL11.GL_BLEND);
-        OpenGlHelper.glBlendFunc(770, 771, 1, 0);
-
-        Tessellator t = Tessellator.instance;
-        GL11.glDisable(GL11.GL_TEXTURE_2D);
-        t.startDrawingQuads();
-        t.setColorRGBA_F(0.08F, 0.07F, 0.06F, 0.55F);
-        t.addVertex(-half - 2, -1.5, 0.0D);
-        t.addVertex(-half - 2, 8.5, 0.0D);
-        t.addVertex(half + 2, 8.5, 0.0D);
-        t.addVertex(half + 2, -1.5, 0.0D);
-        t.draw();
-        GL11.glEnable(GL11.GL_TEXTURE_2D);
-
-        // faint pass through walls, then the full-brightness pass with depth
-        fr.drawString(prefix, -half, 0, 0x40000000 | prefixColor);
-        fr.drawString(main, -half + wPrefix, 0, 0x40000000 | textColor);
-        GL11.glEnable(GL11.GL_DEPTH_TEST);
-        GL11.glDepthMask(true);
-        fr.drawString(prefix, -half, 0, 0xFF000000 | prefixColor);
-        fr.drawString(main, -half + wPrefix, 0, 0xFF000000 | lighten(textColor));
-
-        GL11.glEnable(GL11.GL_LIGHTING);
-        GL11.glDisable(GL11.GL_BLEND);
-        GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-        GL11.glPopMatrix();
-    }
-
-    /** Keep dark agent colours readable on the dark pill. */
-    private static int lighten(int rgb) {
-        int r = (rgb >> 16) & 0xFF, g = (rgb >> 8) & 0xFF, b = rgb & 0xFF;
-        int lum = (r * 299 + g * 587 + b * 114) / 1000;
-        if (lum >= 110) return rgb;
-        r = r + (255 - r) / 2;
-        g = g + (255 - g) / 2;
-        b = b + (255 - b) / 2;
-        return (r << 16) | (g << 8) | b;
+        if (mode == PlateDeclutter.DOT) {
+            // marker only: the "!" badge, or the status dot in a dark ring
+            if (waiting > 0) drawBadge(0, -DOT_R, waiting);
+            else {
+                Ui.dot(0, -DOT_R, 10, 0xF01C1815);
+                Ui.dot(0, -DOT_R, 7, 0xFF000000 | statusColor);
+            }
+            endBillboard();
+            return;
+        }
+        String extra = groupSize > 1 ? "+" + (groupSize - 1) + " here" : "";
+        float extraW = extra.isEmpty() ? 0 : reg.width(extra, ss) + ss * 1.1F + 5;
+        float dot = ns * 0.24F;
+        String n1 = TextLayout.ellipsize(t.name, MAX_W - dot * 3 - extraW, bold.measure(ns));
+        String n2 = mode == PlateDeclutter.MINI ? "" : TextLayout.ellipsize(row2(t, mode), MAX_W, reg.measure(ss));
+        float[] m = metrics(t, groupSize, mode);
+        float w1 = m[0], half = m[2], h = m[3];
+        float lh1 = bold.lineHeight(ns);
+        int nameC = Theme.readable(t.color, bg), stC = Theme.readable(statusColor, bg);
+        Ui.round(-half, -h, half, 0, 7, 0xB4000000 | bg);
+        if (waiting > 0) drawBadge(-half - 15, -h / 2, waiting);
+        for (int pass = 0; pass < 2; pass++) {
+            int alpha = pass == 0 ? 0x50000000 : 0xFF000000;
+            if (pass == 1) {
+                GL11.glEnable(GL11.GL_DEPTH_TEST);
+                GL11.glDepthMask(true);
+            }
+            float x1 = -w1 / 2;
+            Ui.dot(x1 + dot, -h + 3 + lh1 * 0.5F, dot, alpha | statusColor);
+            bold.draw(n1, x1 + dot * 3, -h + 3, ns, alpha | nameC);
+            if (!extra.isEmpty()) Ui.pill(reg, extra, w1 / 2 - extraW + 5, -h + 3 + (lh1 - Ui.pillHeight(reg, ss)) / 2, ss, 0xEE9474);
+            if (!n2.isEmpty()) reg.drawCentered(n2, 0, -h + 3 + lh1, ss, alpha | stC);
+        }
+        endBillboard();
     }
 }

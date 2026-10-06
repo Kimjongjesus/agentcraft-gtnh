@@ -12,6 +12,8 @@ touches the real Hermes. Run the adapter against it with ``--hermes-home <dir>/.
     python3 scripts/demo_hq.py <dir> crash         # Sonnet's run crashes -> error lamp/beacon
     python3 scripts/demo_hq.py <dir> all-idle      # every run ends cleanly -> fleet idle
     python3 scripts/demo_hq.py <dir> wall-move     # card 3: cards change columns, new plan note
+    python3 scripts/demo_hq.py <dir> all-waiting   # card 4: every on-shift agent waits on Eli at once
+    python3 scripts/demo_hq.py <dir> history       # card 4: 40 done cards older than the task window
 """
 
 from __future__ import annotations
@@ -222,8 +224,35 @@ def all_idle(root: Path) -> None:
     log("all-idle: no live runs, nothing waiting")
 
 
+def all_waiting(root: Path) -> None:
+    """Card 4: every on-shift agent waits on Eli at once (the stacked-at-one-spot bug scene)."""
+    b = board(root)
+    t = int(time.time())
+    n = 0
+    for i, prof in enumerate(PROFILES):
+        if prof in OFF_SHIFT:
+            continue
+        tid_ = f"t_wait{i}"
+        b.task(tid_, f"Decision fixture {i + 1}: pick an option", "blocked", prof, block_kind="needs_input", priority=50)
+        b.event(tid_, "blocked", {"reason": f"QUESTION q{i + 1}: option A or option B? || CHOICES: A | B",
+                                  "kind": "needs_input"}, at=t - i)
+        n += 1
+    log(f"all-waiting: {n} agents waiting on Eli")
+
+
+def history(root: Path) -> None:
+    """Card 4: old done cards (outside the 3-day task window), so 'done all time' > 'done, last 3 days'."""
+    b = board(root)
+    t = int(time.time())
+    for i in range(40):
+        tid_ = f"t_hist{i:02d}"
+        b.task(tid_, f"Archived fixture card {i + 1}", "done", "claude-builder-mega")
+        b.sql("UPDATE tasks SET completed_at=?, created_at=? WHERE id=?", (t - (5 + i) * 86400, t - (6 + i) * 86400, tid_))
+    log("history: 40 done cards older than the task window")
+
+
 PHASES = {"init": init, "progress": progress, "demo-ready": demo_ready, "unblock": unblock, "crash": crash,
-          "all-idle": all_idle, "wall-move": wall_move}
+          "all-idle": all_idle, "wall-move": wall_move, "all-waiting": all_waiting, "history": history}
 
 
 def main() -> int:

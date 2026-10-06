@@ -1,0 +1,71 @@
+# Card-4 additions to the throwaway QA arena (after qa-arena.txt and qa-arena-card3.txt). DEV/QA
+# servers ONLY (RFG FLAT world); never the real world. A small waiting nook east of the arena:
+# the 'user' station sits between desk blocks (bookshelves) on every side and a back wall, open
+# to the west, so the old 1.6-block hover ring around the anchor is blocked everywhere: the
+# 'all waiting agents stacked on one spot' scene from Eli's HQ screenshots.
+# back wall (x = anchor + 4) and side walls (z = anchor -5 / +5), two blocks high
+setblock -27 4 -235 stonebrick
+setblock -27 4 -234 stonebrick
+setblock -27 4 -233 stonebrick
+setblock -27 4 -232 stonebrick
+setblock -27 4 -231 stonebrick
+setblock -27 4 -230 stonebrick
+setblock -27 4 -229 stonebrick
+setblock -27 4 -228 stonebrick
+setblock -27 4 -227 stonebrick
+setblock -27 4 -226 stonebrick
+setblock -27 4 -225 stonebrick
+setblock -31 4 -235 stonebrick
+setblock -31 4 -225 stonebrick
+setblock -30 4 -235 stonebrick
+setblock -30 4 -225 stonebrick
+setblock -29 4 -235 stonebrick
+setblock -29 4 -225 stonebrick
+setblock -28 4 -235 stonebrick
+setblock -28 4 -225 stonebrick
+setblock -27 5 -235 stonebrick
+setblock -27 5 -234 stonebrick
+setblock -27 5 -233 stonebrick
+setblock -27 5 -232 stonebrick
+setblock -27 5 -231 stonebrick
+setblock -27 5 -230 stonebrick
+setblock -27 5 -229 stonebrick
+setblock -27 5 -228 stonebrick
+setblock -27 5 -227 stonebrick
+setblock -27 5 -226 stonebrick
+setblock -27 5 -225 stonebrick
+setblock -31 5 -235 stonebrick
+setblock -31 5 -225 stonebrick
+setblock -30 5 -235 stonebrick
+setblock -30 5 -225 stonebrick
+setblock -29 5 -235 stonebrick
+setblock -29 5 -225 stonebrick
+setblock -28 5 -235 stonebrick
+setblock -28 5 -225 stonebrick
+# desk blocks on every first-ring hover spot around the anchor
+setblock -29 4 -230 bookshelf
+setblock -33 4 -230 bookshelf
+setblock -31 4 -228 bookshelf
+setblock -31 4 -232 bookshelf
+setblock -29 4 -228 bookshelf
+setblock -33 4 -228 bookshelf
+setblock -29 4 -232 bookshelf
+setblock -33 4 -232 bookshelf
+# the user station: slot 1 and slot 2 inside the nook (replaces the card-2 positions)
+agentcraft anchor set user -30.5 4 -229.5 west
+agentcraft anchor set user_2 -31.5 4 -228.5 west
+# QA cameras for the nook: far (about 15 blocks, high above the card-2 library corner) and close
+# (about 9 blocks, raised so the fanned-out agents west of the nook are in view, not in the lens)
+# (a glass block under each so the camera player does not fall to the ground)
+setblock -46 11 -230 glass
+setblock -40 7 -230 glass
+agentcraft anchor set cam_waiting -45.5 12 -229.5 -90 30
+agentcraft anchor set cam_waiting_near -39.5 8 -229.5 -90 24
+# distance cameras for the readability checks (the screen faces are at x = -71.49 / z = -236.49)
+agentcraft anchor set cam_wall_near -69 4 -226 90 0
+agentcraft anchor set cam_wall_mid -63 4 -226 90 0
+# far: about 11.5 blocks from the wall centre, raised and to the side so the fleet beacon at
+# -62 4 -226 (beam and floating label) is not between the camera and the wall
+agentcraft anchor set cam_wall_far -61.5 8 -229.5 71 21
+agentcraft anchor set cam_atrium_far -59.5 4 -221 90 0
+agentcraft anchor set cam_monitor_far -55.5 4 -226.5 180 0

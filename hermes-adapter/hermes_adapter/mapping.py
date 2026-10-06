@@ -413,6 +413,9 @@ class Mapper:
             counts = {c: 0 for c in WALL_COLUMNS}
             for t in mine:
                 counts[t["status"]] = counts.get(t["status"], 0) + 1
+            # card 4: the wall shows the done cards of the task window, the ring counts every done
+            # card ever; both numbers travel on the goal (one source of truth) with the window size
+            done_recent = counts["done"]
             if b.done_total is not None:
                 counts["done"] = max(counts["done"], b.done_total)
             total = sum(counts.values())
@@ -429,6 +432,8 @@ class Mapper:
                 "counts": counts,
                 "total": total,
                 "openDecisions": n_open,
+                "doneRecent": done_recent,
+                "windowDays": b.window_days if b.done_total is not None and b.window_days else 0,
             })
         out.sort(key=lambda g: (g["createdAt"], g["id"]))  # protocol: oldest first
         return out

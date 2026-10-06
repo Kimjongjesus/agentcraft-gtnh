@@ -130,6 +130,12 @@ Open cards come from the task window; `done` counts every done card on the board
 days". `progress = done / total`, cancelled/archived cards left out. `goal` in the snapshot is the
 most recently active board's goal. Every Task carries `goalId`. `goal.upsert` is sent when any of these change.
 
+Card 4 adds two count fields so every surface shows the same numbers: `doneRecent` (done cards
+inside the task window, i.e. the wall's Done column) and `windowDays` (that window in days, e.g.
+`3`; `0` when the source has no separate all-time count, so the list already holds every done
+card). Both are plain numbers derived from the same rows as `counts`; no new text leaves the
+adapter. The mod labels them "last 3 days" (wall, `doneRecent`) and "all time" (ring, `counts.done`).
+
 ### Library (`memory[]` / `memory.upsert`, <= 64 entries, bodies <= 1200 chars)
 
 The upstream protocol calls it memory; here it is a read-only library built ONLY from text the
