@@ -124,6 +124,19 @@ class AdapterServer:
             out.append({"type": "task.upsert", "task": t})
         for d in diff_entities(old["decisions"], new["decisions"]):
             out.append({"type": "decision.upsert", "decision": d})
+        for g in diff_entities(old["goals"], new["goals"]):
+            out.append({"type": "goal.upsert", "goal": g})
+        # library entries that dropped out (decision answered, note aged out of the window) are
+        # replaced by a tombstone: same id, empty body, "removed": true (an extra field; upstream
+        # receivers ignore it and show an empty note). Kept in the model for one poll, like the
+        # cancelled tasks above, so it is sent exactly once and never appears in a snapshot.
+        new_mem = {e["id"] for e in new["memory"]}
+        for e in old["memory"]:
+            if e["id"] not in new_mem and not e.get("removed"):
+                new["memory"].append({"id": e["id"], "scope": e["scope"], "title": e["title"], "body": "",
+                                      "updated": e["updated"], "removed": True})
+        for e in diff_entities(old["memory"], new["memory"]):
+            out.append({"type": "memory.upsert", "entry": e})
         seen_feed = {(f["ts"], f["text"]) for f in old["feed"]}
         last_ts = max((f["ts"] for f in old["feed"]), default=0)
         for f in new["feed"]:
@@ -141,7 +154,12 @@ class AdapterServer:
     def snapshot(self) -> dict[str, Any]:
         assert self.model is not None
         m = self.model
-        return {"type": "snapshot", **{k: m[k] for k in ("foreman", "agents", "tasks", "decisions", "repos", "memory", "goals", "feed", "logs")}}
+        snap = {"type": "snapshot", **{k: m[k] for k in ("foreman", "agents", "tasks", "decisions", "repos", "memory", "goals", "feed", "logs")}}
+        snap["memory"] = [e for e in m["memory"] if not e.get("removed")]
+        if m["goals"]:
+            # protocol: the current goal; with one goal per board that is the most recently active board
+            snap["goal"] = max(m["goals"], key=lambda g: (g["updatedAt"], g["id"]))
+        return snap
 
     # ---- wire ----------------------------------------------------------------------------
     @staticmethod

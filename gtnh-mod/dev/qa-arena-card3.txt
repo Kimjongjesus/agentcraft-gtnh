@@ -1,0 +1,19 @@
+# Card-3 additions to the throwaway QA arena (dev/qa-arena.txt first). DEV/QA servers ONLY (RFG
+# FLAT world); never the real world. Console commands, fed in order by dev/run-hq-qa.sh feed.
+# A 5x3 task wall, two 3x3 goal atrium panels (one board, all boards) and a library, all facing
+# east (metadata 5) on the west edge of the arena, plus QA cameras for each.
+setblock -72 4 -226 agentcraftgtnh:task_wall 5
+setblock -72 4 -221 agentcraftgtnh:goal_atrium 5
+setblock -72 4 -217 agentcraftgtnh:goal_atrium 5
+setblock -72 4 -212 agentcraftgtnh:library 5
+# bindings: board slug or "all" (console form takes coordinates, then the screen size)
+agentcraft bind all -72 4 -226 5 3
+agentcraft bind homelab -72 4 -221 3 3
+agentcraft bind all -72 4 -217 3 3
+agentcraft bind all -72 4 -212
+# QA cameras: feet position, yaw (90 = looking west), pitch
+agentcraft anchor set cam_wall -67 4 -226 90 0
+agentcraft anchor set cam_atrium -64.5 4 -219 90 0
+agentcraft anchor set cam_library -68.5 4 -211.5 90 18
+# the card-2 fleet beacon (-62 4 -226) up close: its board summary label
+agentcraft anchor set cam_beacon_near -58.5 4 -225.5 90 0

@@ -14,7 +14,8 @@ Code: `hermes_adapter/mapping.py` (pure function, unit-tested in `tests/test_map
 | Cron `~/.hermes/cron/jobs.json` | only `name, enabled, state, last_status, last_run_at, next_run_at, failure_streak, schedule` | the `cron` "Scheduler" agent + feed |
 
 Boards default to every board except `*scratch*`; `--boards homelab,ai-ops` overrides. Archived
-cards are skipped; `done` cards are kept for 3 days. Never read: memory files, `personal-*.md`,
+cards are skipped; `done` cards are kept for 3 days (the goal ring additionally counts every done
+card on the board, a number only). Never read: memory files, `personal-*.md`,
 `auth.json`, `.env`, cron prompts/delivery targets/errors, session transcripts, attachments.
 
 Why SQLite by default instead of the CLI: it is the same database `hermes kanban` reads, it gives
@@ -119,10 +120,42 @@ canaries and flag-style secrets and check both the snapshot and the live `agent.
 Card events ("Opus Builder picked up ...", "... is waiting: ...", "... finished ...", errors) and
 cron runs in the last 3 days ("cron <name> ran: ok").
 
+### Goal (one per board; card 3 atrium, `goals[]` / `goal.upsert`)
+
+Hermes has no goal object; each kanban board is one goal: `id = board-<slug>`, `text = "Board
+<slug>"`, extra fields `board`, `counts` (`todo doing review done blocked`), `total` and
+`openDecisions` (a COUNT of open decisions on that board; the question text is never on a goal).
+Open cards come from the task window; `done` counts every done card on the board (one
+`SELECT COUNT(*)`, no titles), so the ring is the board's overall progress, not "done in the last 3
+days". `progress = done / total`, cancelled/archived cards left out. `goal` in the snapshot is the
+most recently active board's goal. Every Task carries `goalId`. `goal.upsert` is sent when any of these change.
+
+### Library (`memory[]` / `memory.upsert`, <= 64 entries, bodies <= 1200 chars)
+
+The upstream protocol calls it memory; here it is a read-only library built ONLY from text the
+adapter already sends elsewhere, never from Hermes memory:
+
+| entry | source (already sent as) | id |
+| --- | --- | --- |
+| plan / handoff / review verdict | newest `PLAN:` / `HANDOFF:` / `PASS` `REVISE` `VERIFICATION` comment per card and author, written by an agent profile (log tails) | `<agent>/<kind>-<card>` |
+| done summary | result summary of the 12 newest done cards (`Task.summary`) | `shared/done-<card>` |
+| board overview | per board: counts plus up to 8 card titles per open column (`Task.title`) | `shared/board-<slug>` |
+| waiting on Eli | the question and choices of every open decision (`Decision.question`) | `<agent>/decision-<id>` |
+
+Comments by anyone who is not an agent profile (Eli, the intake) are left out, and so are comments
+without one of those prefixes. Every body is filtered as a whole source by `clean()` (flag-style
+secrets, tokens, home paths, personal-note references -> whole text withheld) BEFORE it is cut to
+1200 chars. An entry that drops out (decision answered, note aged out) is sent once as a tombstone
+`memory.upsert {id, removed: true, body: ""}` and never appears in a snapshot.
+
+Deliberately NOT sources (left out because they are not safe or not needed): Hermes memory files,
+`personal-*.md`, cron prompts, profile configs and SOUL files, card bodies beyond the 280-char
+`description`, comments by humans. `tests/test_card3_library.py` checks sources, bounds and
+privacy on both the full snapshot and the incremental messages.
+
 ### Not mapped (always empty)
 
-`repos`, `memory` (Hermes memory may hold personal notes; it is never exported), `goals`/`goal`.
-`foreman` = `{backend: "claude", auth: "ok", message: "Hermes ai-ops (read-only) ...", adapter:
+`repos`. `foreman` = `{backend: "claude", auth: "ok", message: "Hermes ai-ops (read-only) ...", adapter:
 "hermes", readOnly: true}`; `backend` stays inside the upstream enum so the upstream schema and
 Fabric mod accept it.
 

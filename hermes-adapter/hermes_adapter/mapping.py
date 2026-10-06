@@ -75,6 +75,15 @@ RECENT_ERROR_S = 30 * 60
 STALE_HEARTBEAT_S = 20 * 60
 
 _PREFIX = re.compile(r"^\s*(PLAN|PROGRESS|HANDOFF|STEER[^:]*|ANSWER[^:]*|NOTE)\s*:\s*", re.I)
+# Library (MemoryEntry) notes: which agent comments count as a plan / handoff / review note.
+_NOTE = re.compile(r"^\s*(PLAN|HANDOFF|PASS|REVISE|VERIFICATION)\b", re.I)
+NOTE_KIND = {"PLAN": "plan", "HANDOFF": "handoff", "PASS": "review", "REVISE": "review", "VERIFICATION": "review"}
+NOTE_LABEL = {"plan": "Plan", "handoff": "Handoff", "review": "Verdict"}
+LIBRARY_NOTES = 36  # newest plan/handoff/review notes
+LIBRARY_DONE = 12  # newest done cards with a summary
+LIBRARY_MAX = 64  # every library entry together
+LIBRARY_BODY = 1200  # characters per entry body (after whole-source filtering)
+WALL_COLUMNS = ("todo", "doing", "review", "done", "blocked")
 _DECISION = re.compile(r"^\s*(QUESTION|PERMISSION|DEMO READY|REVISE|HELD|NEEDS INPUT)\b\s*([A-Za-z]?\d+)?\s*[:\-\u2014]?\s*", re.I)
 
 
@@ -134,6 +143,11 @@ def parse_decision_reason(reason: str) -> tuple[str, str, list[str]]:
         if m:
             options = [clean(o, 40) for o in m.group(1).split("|") if o.strip()][:5]
     return kind, text.strip(), options
+
+
+def goal_id(board: str) -> str:
+    """Protocol goal id of a Kanban board (one goal per board, see MAPPING.md "Goals")."""
+    return f"board-{clean_id(board)}"
 
 
 def board_task_ids(boards: list[BoardData]) -> dict[tuple[str, str], str]:
@@ -230,6 +244,7 @@ class Mapper:
                 "createdAt": ms(created),
                 "updatedAt": ms(max(created, last_update.get(key, 0), t.get("completed_at") or 0, t.get("started_at") or 0)),
                 "board": t["_b"],
+                "goalId": goal_id(t["_b"]),
             }
             if t.get("body"):
                 task["description"] = clean(t["body"], 280)
@@ -247,6 +262,7 @@ class Mapper:
                 task["summary"] = clean(summ, 280)
             tasks.append(task)
         tasks.sort(key=lambda x: x["updatedAt"], reverse=True)
+        all_tasks = list(tasks)  # goal counts use every card in the window, not just the 200 sent
         tasks = tasks[:200]
 
         # ---- decisions (needs_input blocks) -------------------------------------------------
@@ -281,6 +297,11 @@ class Mapper:
         open_d = [d for d in decisions if d["status"] == "open"]
         done_d = [d for d in decisions if d["status"] != "open"][-20:]
         decisions = sorted(open_d + done_d, key=lambda d: d["createdAt"])
+
+        # ---- goals (one per board) and the library ------------------------------------------
+        goals = self._goals(data.boards, all_tasks, decisions)
+        memory = self._library(
+            tasks_by_key, out_id, agent_ids, comments, latest_summary, all_tasks, goals, decisions)
 
         # ---- agents -------------------------------------------------------------------------
         agents: list[dict[str, Any]] = []
@@ -367,11 +388,172 @@ class Mapper:
             "tasks": tasks,
             "decisions": decisions,
             "repos": [],
-            "memory": [],
-            "goals": [],
+            "memory": memory,
+            "goals": goals,
             "feed": feed,
             "logs": log_list,
         }
+
+    # -------------------------------------------------------------------------------------
+    @staticmethod
+    def _goals(boards: list[BoardData], tasks: list[dict[str, Any]], decisions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """One Goal per board: progress = done / (open cards + done cards), cancelled left out.
+
+        Open cards are all in the task window; done cards are counted over the WHOLE board
+        (``BoardData.done_total``, a count only) so the ring shows the board's overall progress
+        rather than "done in the last few days". Hermes has no goal object; a board is the closest
+        thing to "the objective the team works on". Extra fields (ignored by upstream receivers):
+        ``board``, ``counts`` per wall column, ``total`` and ``openDecisions`` (a count only: the
+        question text is never on a goal).
+        """
+        board_of = {t["id"]: t["board"] for t in tasks}
+        out: list[dict[str, Any]] = []
+        for b in boards:
+            mine = [t for t in tasks if t["board"] == b.slug and t["status"] != "cancelled"]
+            counts = {c: 0 for c in WALL_COLUMNS}
+            for t in mine:
+                counts[t["status"]] = counts.get(t["status"], 0) + 1
+            if b.done_total is not None:
+                counts["done"] = max(counts["done"], b.done_total)
+            total = sum(counts.values())
+            done = counts["done"]
+            n_open = sum(1 for d in decisions if d["status"] == "open" and board_of.get(d.get("taskId", "")) == b.slug)
+            out.append({
+                "id": goal_id(b.slug),
+                "text": clean(f"Board {b.slug}", 80),
+                "progress": round(done / total, 4) if total else 0.0,
+                "status": "planning" if not total else "done" if done == total else "active",
+                "createdAt": min((t["createdAt"] for t in mine), default=0),
+                "updatedAt": max((t["updatedAt"] for t in mine), default=0),
+                "board": b.slug,
+                "counts": counts,
+                "total": total,
+                "openDecisions": n_open,
+            })
+        out.sort(key=lambda g: (g["createdAt"], g["id"]))  # protocol: oldest first
+        return out
+
+    @staticmethod
+    def _library(
+        tasks_by_key: dict[tuple[str, str], dict[str, Any]],
+        out_id: dict[tuple[str, str], str],
+        agent_ids: dict[str, str],
+        comments: list[dict[str, Any]],
+        latest_summary: dict[tuple[str, str], str],
+        tasks: list[dict[str, Any]],
+        goals: list[dict[str, Any]],
+        decisions: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Read-only Library (protocol ``memory``) built ONLY from text the adapter already sends in
+        other places, now at a longer length (MAPPING.md "Library"):
+
+        * plan / handoff / review-verdict comments written by agent profiles (logs carry the same
+          comments today); comments by anyone else (Eli, the intake) are left out;
+        * the result summaries of the newest done cards (Task.summary today);
+        * one overview per board (card titles per column, Task.title today);
+        * the question of every open decision (Decision.question today).
+
+        Memory files, ``personal-*.md``, cron prompts and credentials are never read by the adapter
+        at all (sources.py), so they cannot reach the library. Every body is filtered as a WHOLE
+        source by redact.clean() before it is cut to LIBRARY_BODY characters.
+        """
+        entries: list[dict[str, Any]] = []
+        # 1. newest plan / handoff / review note per (card, kind, author)
+        latest: dict[tuple[str, str, str, str], dict[str, Any]] = {}
+        for c in comments:
+            aid = agent_ids.get(c.get("author")) if isinstance(c.get("author"), str) else None
+            key = (c["_b"], c["task_id"])
+            if not aid or key not in tasks_by_key:
+                continue
+            m = _NOTE.match(c.get("body") or "")
+            if not m:
+                continue
+            kind = NOTE_KIND[m.group(1).upper()]
+            k = (key[0], key[1], kind, aid)
+            if k not in latest or (c["created_at"] or 0) >= (latest[k]["created_at"] or 0):
+                latest[k] = c
+        notes: list[dict[str, Any]] = []
+        for (board, card, kind, aid), c in latest.items():
+            tid = out_id[(board, card)]
+            title = short_title(tasks_by_key[(board, card)].get("title") or card, 70)
+            notes.append({
+                "id": f"{aid}/{kind}-{clean_id(tid)}",
+                "scope": aid,
+                "title": clean(f"{NOTE_LABEL[kind]}: {title}", 100),
+                "body": clean(c.get("body"), LIBRARY_BODY, keep_newlines=True),
+                "updated": ms(c["created_at"]),
+                "author": aid,
+                "kind": kind,
+                "taskId": tid,
+                "board": board,
+            })
+        notes.sort(key=lambda e: e["updated"], reverse=True)
+        entries += notes[:LIBRARY_NOTES]
+
+        # 2. result summaries of the newest done cards
+        done = [t for t in tasks if t["status"] == "done" and t.get("summary")]
+        done.sort(key=lambda t: t["updatedAt"], reverse=True)
+        key_of = {out_id[k]: k for k in out_id}
+        for t in done[:LIBRARY_DONE]:
+            k = key_of.get(t["id"])
+            raw = (latest_summary.get(k) if k else None) or (tasks_by_key.get(k) or {}).get("result") or t["summary"]
+            e: dict[str, Any] = {
+                "id": f"shared/done-{clean_id(t['id'])}",
+                "scope": "shared",
+                "title": clean(f"Done: {t['title']}", 100),
+                "body": clean(raw, LIBRARY_BODY, keep_newlines=True),
+                "updated": t["updatedAt"],
+                "kind": "summary",
+                "taskId": t["id"],
+                "board": t["board"],
+            }
+            if t.get("assignee"):
+                e["author"] = t["assignee"]
+            entries.append(e)
+
+        # 3. one overview per board: card titles per column (already on every Task)
+        for g in goals:
+            mine = [t for t in tasks if t["board"] == g["board"]]
+            lines = [f"{g['text']}: {g['counts']['done']} of {g['total']} cards done, "
+                     f"{g['openDecisions']} decision(s) waiting on Eli."]
+            for col in ("doing", "review", "blocked", "todo"):
+                col_tasks = sorted((t for t in mine if t["status"] == col), key=lambda t: (-t["priority"], -t["updatedAt"]))
+                if not col_tasks:
+                    continue
+                lines.append("")
+                lines.append(f"{col.capitalize()} ({len(col_tasks)}):")
+                lines += [f"- {short_title(t['title'], 70)}" for t in col_tasks[:8]]
+                if len(col_tasks) > 8:
+                    lines.append(f"- ... {len(col_tasks) - 8} more")
+            entries.append({
+                "id": f"shared/board-{clean_id(g['board'])}",
+                "scope": "shared",
+                "title": clean(f"Overview: {g['text']}", 100),
+                "body": clean("\n".join(lines), LIBRARY_BODY, keep_newlines=True),
+                "updated": g["updatedAt"],
+                "kind": "overview",
+                "board": g["board"],
+            })
+
+        # 4. open decisions: the (already filtered) question, read-only; nothing in-game answers
+        board_of = {t["id"]: t["board"] for t in tasks}
+        for d in decisions:
+            if d["status"] != "open":
+                continue
+            body = d["question"] + ("\n\nChoices: " + " | ".join(d["options"]) if d["options"] else "")
+            entries.append({
+                "id": f"{d['agentId']}/decision-{clean_id(d['id'])}",
+                "scope": d["agentId"],
+                "title": clean(f"Waiting on Eli: {d.get('context') or d['id']}", 100),
+                "body": clean(body, LIBRARY_BODY, keep_newlines=True),
+                "updated": d["createdAt"],
+                "author": d["agentId"],
+                "kind": "decision",
+                "taskId": d.get("taskId", ""),
+                "board": board_of.get(d.get("taskId", ""), ""),
+            })
+        entries.sort(key=lambda e: e["updated"], reverse=True)
+        return entries[:LIBRARY_MAX]
 
     # -------------------------------------------------------------------------------------
     def _agent(

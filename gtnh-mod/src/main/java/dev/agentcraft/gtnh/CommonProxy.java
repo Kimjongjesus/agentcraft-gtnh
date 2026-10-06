@@ -20,7 +20,7 @@ public class CommonProxy {
 
     public static ForemanBridge bridge;
     public static AgentWorldSync sync;
-    public static BlockAgentCraft monitor, lamp, beacon;
+    public static BlockAgentCraft monitor, lamp, beacon, taskWall, library, atrium;
 
     public void preInit(FMLPreInitializationEvent event) {
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
@@ -29,13 +29,25 @@ public class CommonProxy {
         monitor = new BlockAgentCraft(BlockAgentCraft.Kind.MONITOR);
         lamp = new BlockAgentCraft(BlockAgentCraft.Kind.LAMP);
         beacon = new BlockAgentCraft(BlockAgentCraft.Kind.BEACON);
+        taskWall = new BlockAgentCraft(BlockAgentCraft.Kind.TASKWALL);
+        library = new BlockAgentCraft(BlockAgentCraft.Kind.LIBRARY);
+        atrium = new BlockAgentCraft(BlockAgentCraft.Kind.ATRIUM);
         GameRegistry.registerBlock(monitor, "monitor");
         GameRegistry.registerBlock(lamp, "status_lamp");
         GameRegistry.registerBlock(beacon, "fleet_beacon");
+        GameRegistry.registerBlock(taskWall, "task_wall");
+        GameRegistry.registerBlock(library, "library");
+        GameRegistry.registerBlock(atrium, "goal_atrium");
         GameRegistry.registerTileEntity(TileAgentCraft.Monitor.class, AgentCraftGTNH.MODID + ".monitor");
         GameRegistry.registerTileEntity(TileAgentCraft.Lamp.class, AgentCraftGTNH.MODID + ".status_lamp");
         GameRegistry.registerTileEntity(TileAgentCraft.Beacon.class, AgentCraftGTNH.MODID + ".fleet_beacon");
+        GameRegistry.registerTileEntity(TileAgentCraft.TaskWall.class, AgentCraftGTNH.MODID + ".task_wall");
+        GameRegistry.registerTileEntity(TileAgentCraft.Library.class, AgentCraftGTNH.MODID + ".library");
+        GameRegistry.registerTileEntity(TileAgentCraft.Atrium.class, AgentCraftGTNH.MODID + ".goal_atrium");
     }
+
+    /** Client only (ClientProxy): open the read-only task wall / library / atrium screen. */
+    public void openHqScreen(BlockAgentCraft.Kind kind, String binding) {}
 
     public void init(FMLInitializationEvent event) {
         // 1.7.10 gotcha: registerModEntity with a tracking range/frequency, or clients never see it

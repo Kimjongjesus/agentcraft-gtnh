@@ -55,6 +55,9 @@ class BoardData:
     runs: list[dict[str, Any]] = field(default_factory=list)
     events: list[dict[str, Any]] = field(default_factory=list)
     comments: list[dict[str, Any]] = field(default_factory=list)
+    # every done card on the board, also the ones older than the task window (a COUNT only; the
+    # goal progress ring). None = the source has no separate count (cli: it already reads them all)
+    done_total: int | None = None
 
 
 @dataclass
@@ -119,6 +122,7 @@ class HermesSource:
                     (since,),
                 )
             ]
+            bd.done_total = int(conn.execute("SELECT COUNT(*) FROM tasks WHERE status = 'done'").fetchone()[0])
             ids = {t["id"] for t in bd.tasks}
             bd.links = [
                 (r["parent_id"], r["child_id"])

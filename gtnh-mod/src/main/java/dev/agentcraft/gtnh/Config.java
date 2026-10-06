@@ -22,6 +22,9 @@ public class Config {
     public static int monitorRenderDistance = 24;
     public static double walkSpeed = 0.3D;
     public static int teleportAfterSeconds = 12;
+    public static int boardSyncSeconds = 2;
+    public static int wallRenderDistance = 32;
+    public static int wallPageSeconds = 8;
 
     public static void synchronizeConfiguration(File configFile) {
         Configuration c = new Configuration(configFile);
@@ -84,6 +87,28 @@ public class Config {
             4,
             128,
             "Client: monitors and lamps draw only within this many blocks of the player.");
+        String gui = "interface";
+        boardSyncSeconds = c.getInt(
+            "boardSyncSeconds",
+            gui,
+            boardSyncSeconds,
+            1,
+            30,
+            "Server: task wall / atrium / library data is sent to clients at most this often, and only when it changed.");
+        wallRenderDistance = c.getInt(
+            "wallRenderDistance",
+            gui,
+            wallRenderDistance,
+            4,
+            128,
+            "Client: task walls and atrium panels draw only within this many blocks of the player.");
+        wallPageSeconds = c.getInt(
+            "wallPageSeconds",
+            gui,
+            wallPageSeconds,
+            2,
+            120,
+            "Client: a task wall column with more cards than fit flips to its next page this often.");
         if (c.hasChanged()) {
             c.save();
         }

@@ -73,10 +73,60 @@ def beacon_top(x, y):
     return (74, 80, 92, 255)
 
 
+def taskwall_front(x, y):
+    # walnut frame, cork board, five rows of little paper cards in column colours
+    if edge(x, y):
+        return (59, 42, 32, 255)
+    cols = [(156, 148, 136), (47, 163, 160), (201, 162, 39), (143, 169, 139), (217, 119, 87)]
+    if 2 <= y <= 13 and x in (2, 3, 5, 6, 8, 9, 11, 12):
+        c = cols[(x - 2) // 3 % 5] if y in (2, 3) else (233, 225, 211)
+        if y in (5, 8, 11) or y in (2, 3):
+            return (*c, 255) if y in (2, 3) else (200, 190, 175, 255)
+        return (233, 225, 211, 255)
+    return (120, 92, 66, 255) if (x * 5 + y * 3) % 7 else (104, 80, 58, 255)
+
+
+def atrium_front(x, y):
+    if edge(x, y):
+        return (59, 42, 32, 255)
+    d = ((x - 7.5) ** 2 + (y - 7.5) ** 2) ** 0.5
+    if 3.6 <= d <= 5.8:
+        import math
+        a = (math.degrees(math.atan2(x - 7.5, -(y - 7.5))) + 360) % 360
+        return (143, 169, 139, 255) if a < 250 else (58, 54, 50, 255)
+    return (26, 25, 23, 255)
+
+
+def library_front(x, y):
+    # bookshelf: two shelves of book spines in the palette colours
+    if edge(x, y) or y in (7, 8):
+        return (77, 55, 39, 255)
+    spines = [(217, 119, 87), (47, 163, 160), (201, 162, 39), (143, 169, 139), (91, 141, 239), (180, 85, 58)]
+    c = spines[(x + (y // 8) * 3) % len(spines)]
+    shade = 0 if x % 2 else 18
+    if y in (1, 9):
+        return (40, 30, 22, 255)
+    return (max(0, c[0] - shade), max(0, c[1] - shade), max(0, c[2] - shade), 255)
+
+
+def library_side(x, y):
+    if edge(x, y):
+        return (77, 55, 39, 255)
+    v = 99 + ((x * 3 + y * 7) % 4) * 4
+    return (v, v - 28, v - 48, 255)
+
+
+def library_top(x, y):
+    v = 122 + ((x + y * 5) % 6) * 3
+    return (v, v - 32, v - 56, 255)
+
+
 def main(out: Path):
     out.mkdir(parents=True, exist_ok=True)
     for name, fn in [("monitor_front", monitor_front), ("monitor_side", monitor_side), ("lamp", lamp),
-                     ("beacon_side", beacon_side), ("beacon_top", beacon_top)]:
+                     ("beacon_side", beacon_side), ("beacon_top", beacon_top), ("taskwall_front", taskwall_front),
+                     ("atrium_front", atrium_front), ("library_front", library_front), ("library_side", library_side),
+                     ("library_top", library_top)]:
         png(out / f"{name}.png", grid(fn))
         print("wrote", out / f"{name}.png")
 

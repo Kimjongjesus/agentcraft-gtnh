@@ -27,9 +27,12 @@ public final class Net {
 
     public static final int MAX_AGENTS = 64;
     public static final int MAX_LINES = 24;
+    /** Card 3 blobs (board, library): total cap and bytes per packet (well under the 32 KiB payload limit). */
+    public static final int MAX_BLOB = 512 * 1024;
+    public static final int BLOB_PART = 30000;
 
     public static SimpleNetworkWrapper CHANNEL;
-    public static long sentPackets, sentLogPackets;
+    public static long sentPackets, sentLogPackets, sentBlobPackets;
 
     private Net() {}
 
@@ -38,6 +41,7 @@ public final class Net {
         CHANNEL.registerMessage(AgentSyncHandler.class, AgentSync.class, 0, Side.CLIENT);
         CHANNEL.registerMessage(LogSyncHandler.class, LogSync.class, 1, Side.CLIENT);
         CHANNEL.registerMessage(AnchorOverlayHandler.class, AnchorOverlay.class, 2, Side.CLIENT);
+        CHANNEL.registerMessage(BlobHandler.class, Blob.class, 3, Side.CLIENT);
     }
 
     public static void sendTo(IMessage msg, EntityPlayerMP player) {
@@ -52,6 +56,7 @@ public final class Net {
 
     private static void count(IMessage msg) {
         if (msg instanceof LogSync) sentLogPackets++;
+        else if (msg instanceof Blob) sentBlobPackets++;
         else sentPackets++;
     }
 
@@ -218,6 +223,69 @@ public final class Net {
         @Override
         public IMessage onMessage(AnchorOverlay msg, MessageContext ctx) {
             ClientAgentCache.setOverlay(msg.names, msg.spots, msg.missing, msg.seconds);
+            return null;
+        }
+    }
+
+    /**
+     * Card 3: one part of a board (tasks + goals) or library blob ({@link dev.agentcraft.gtnh.state.HqData}).
+     * The client swaps its view only when every part of a generation has arrived.
+     */
+    public static final class Blob implements IMessage {
+
+        public static final byte BOARD = 1, LIBRARY = 2;
+        public static final int MAX_PARTS = (MAX_BLOB + BLOB_PART - 1) / BLOB_PART;
+
+        public byte kind;
+        public int gen, index, count;
+        public byte[] data = new byte[0];
+
+        public Blob() {}
+
+        public static List<Blob> split(byte kind, int gen, byte[] all) {
+            List<Blob> out = new ArrayList<>();
+            int count = Math.max(1, (all.length + BLOB_PART - 1) / BLOB_PART);
+            for (int i = 0; i < count && i < MAX_PARTS; i++) {
+                Blob b = new Blob();
+                b.kind = kind;
+                b.gen = gen;
+                b.index = i;
+                b.count = Math.min(count, MAX_PARTS);
+                int from = i * BLOB_PART, to = Math.min(all.length, from + BLOB_PART);
+                b.data = java.util.Arrays.copyOfRange(all, from, to);
+                out.add(b);
+            }
+            return out;
+        }
+
+        @Override
+        public void fromBytes(ByteBuf buf) {
+            kind = buf.readByte();
+            gen = buf.readInt();
+            index = buf.readUnsignedShort();
+            count = buf.readUnsignedShort();
+            int n = buf.readUnsignedShort();
+            if (n > BLOB_PART || n > buf.readableBytes()) throw new IllegalArgumentException("blob part too large");
+            data = new byte[n];
+            buf.readBytes(data);
+        }
+
+        @Override
+        public void toBytes(ByteBuf buf) {
+            buf.writeByte(kind);
+            buf.writeInt(gen);
+            buf.writeShort(index);
+            buf.writeShort(count);
+            buf.writeShort(data.length);
+            buf.writeBytes(data);
+        }
+    }
+
+    public static final class BlobHandler implements IMessageHandler<Blob, IMessage> {
+
+        @Override
+        public IMessage onMessage(Blob msg, MessageContext ctx) {
+            dev.agentcraft.gtnh.state.ClientHq.acceptPart(msg.kind, msg.gen, msg.index, msg.count, msg.data);
             return null;
         }
     }

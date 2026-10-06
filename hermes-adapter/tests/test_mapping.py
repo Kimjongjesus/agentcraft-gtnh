@@ -93,7 +93,9 @@ class MappingTest(unittest.TestCase):
                     "private details", "SECRET PROMPT", "discord:", "/home/aiops"):
             self.assertNotIn(bad, blob, bad)
         self.assertEqual(self.tasks["t_personal"]["description"], "[withheld: mentions personal notes]")
-        self.assertEqual(self.model["memory"], [], "memory files are never exported")
+        # card 3: the library exists now, but only from already-filtered board text, never memory files
+        kinds = {e["kind"] for e in self.model["memory"]}
+        self.assertTrue(kinds <= {"plan", "handoff", "review", "summary", "overview", "decision"}, kinds)
 
     def test_logs_and_feed(self):
         logs = {l["agentId"]: l["entries"] for l in self.model["logs"]}

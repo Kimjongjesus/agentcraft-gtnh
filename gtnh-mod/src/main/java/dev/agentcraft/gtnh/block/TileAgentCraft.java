@@ -86,6 +86,39 @@ public class TileAgentCraft extends TileEntity {
 
     public static class Lamp extends TileAgentCraft {}
 
+    /** Task wall: a W x H screen (default 5 x 3) bound to a board slug, or "" / "all" = every board. */
+    public static class TaskWall extends TileAgentCraft {
+
+        public TaskWall() {
+            screenW = 5;
+            screenH = 3;
+        }
+
+        @Override
+        public AxisAlignedBB getRenderBoundingBox() {
+            int r = Math.max(screenW, screenH);
+            return AxisAlignedBB.getBoundingBox(xCoord - r, yCoord - 1, zCoord - r, xCoord + r + 1, yCoord + r + 1, zCoord + r + 1);
+        }
+
+        @Override
+        public double getMaxRenderDistanceSquared() {
+            double d = Config.wallRenderDistance + 8;
+            return d * d;
+        }
+    }
+
+    /** Goal atrium: a W x H progress-ring panel (default 3 x 3) bound to a board, or every board. */
+    public static class Atrium extends TaskWall {
+
+        public Atrium() {
+            screenW = 3;
+            screenH = 3;
+        }
+    }
+
+    /** Library: no screen in the world; right-click opens the reader (binding = board filter). */
+    public static class Library extends TileAgentCraft {}
+
     public static class Beacon extends TileAgentCraft {
 
         @Override

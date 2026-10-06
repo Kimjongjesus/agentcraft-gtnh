@@ -59,6 +59,8 @@ public final class AgentWorldSync {
     private final Map<String, Integer> sentLogHash = new HashMap<>();
     private final Set<EntityPlayerMP> needsLogs = new HashSet<>();
     private final StationAssigner assigner = new StationAssigner();
+    /** Card 3: tasks, goals and library notes for the task wall, atrium and library. */
+    public final BoardSync board = new BoardSync();
     private Map<String, StationAssigner.Target> targets = Collections.emptyMap();
     private HqAnchors anchors;
     private boolean linkUp;
@@ -83,6 +85,7 @@ public final class AgentWorldSync {
         linkUp = false;
         lastSign = "";
         snapshots = upserts = logMessages = decisionMessages = otherMessages = stateChanges = duplicatesRemoved = 0;
+        board.reset();
         anchors = new HqAnchors(new File(Config.anchorsFile), Config.spawnDimension);
         anchors.load();
         assigner.resetWarnings();
@@ -166,6 +169,7 @@ public final class AgentWorldSync {
         if (logsDirty || !needsLogs.isEmpty()) {
             broadcastLogs();
         }
+        board.tick(tick);
         dirty = false;
         logsDirty = false;
     }
@@ -173,7 +177,10 @@ public final class AgentWorldSync {
     @SubscribeEvent
     public void onLogin(PlayerEvent.PlayerLoggedInEvent e) {
         dirty = true; // next tick re-sends the agents to everyone, including the new player
-        if (e.player instanceof EntityPlayerMP) needsLogs.add((EntityPlayerMP) e.player);
+        if (e.player instanceof EntityPlayerMP) {
+            needsLogs.add((EntityPlayerMP) e.player);
+            board.playerJoined((EntityPlayerMP) e.player);
+        }
     }
 
     @SubscribeEvent
@@ -212,14 +219,19 @@ public final class AgentWorldSync {
                     if (el.isJsonObject()) applyDecision(el.getAsJsonObject());
                 }
                 lastTaskCount = array(m, "tasks").size();
+                board.applySnapshot(m);
                 readStatus(m.has("foreman") && m.get("foreman")
                     .isJsonObject() ? m.getAsJsonObject("foreman") : null);
                 linkUp = true;
                 AgentCraftGTNH.LOG.info(
-                    "snapshot from Hermes adapter: {} agents, {} tasks, {} open decisions ({}); displaying {}",
+                    "snapshot from Hermes adapter: {} agents, {} tasks, {} open decisions, {} goals, {} library notes ({}); displaying {}",
                     agents.size(),
                     lastTaskCount,
                     openDecisions.size(),
+                    board.goals()
+                        .size(),
+                    board.notes()
+                        .size(),
                     foremanMessage,
                     displayedIds());
                 dirty = true;
@@ -274,7 +286,7 @@ public final class AgentWorldSync {
                 dirty = true;
                 break;
             default:
-                otherMessages++; // task/feed messages: card 3 (task wall, library)
+                if (!board.apply(type, m)) otherMessages++; // feed and the rest: not shown in-world
         }
     }
 

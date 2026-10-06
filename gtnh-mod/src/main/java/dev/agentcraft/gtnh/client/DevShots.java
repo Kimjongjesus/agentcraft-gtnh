@@ -30,6 +30,9 @@ import cpw.mods.fml.common.gameevent.TickEvent;
 public final class DevShots {
 
     private static final Pattern SHOT = Pattern.compile("devshot ([A-Za-z0-9_-]{1,40})");
+    /** devgui taskwall|library|close [binding|-] [select]: open a card-3 screen for a screenshot. */
+    private static final Pattern GUI = Pattern.compile("devgui (taskwall|library|close)(?: (\\S+))?(?: (\\S+))?");
+    private volatile String[] pendingGui;
 
     private final String connect = System.getProperty("agentcraft.dev.connect", "");
     private final boolean onChat = System.getProperty("agentcraft.dev.shotOnChat") != null;
@@ -68,9 +71,13 @@ public final class DevShots {
         if (!onChat || e.message == null) return;
         String text = e.message.getUnformattedText();
         Matcher m = SHOT.matcher(text);
+        Matcher g = GUI.matcher(text);
         if (m.find()) {
             pendingShot = m.group(1);
             pendingDelay = 40;
+        } else if (g.find()) {
+            pendingGui = new String[] { g.group(1), g.group(2) == null || "-".equals(g.group(2)) ? "" : g.group(2),
+                g.group(3) == null ? "" : g.group(3) };
         } else if (text.contains("devquit")) {
             pendingQuit = true;
         }
@@ -100,6 +107,22 @@ public final class DevShots {
         ticksInWorld++;
         if (onChat) {
             mc.gameSettings.hideGUI = true;
+            String[] gui = pendingGui;
+            if (gui != null) {
+                pendingGui = null;
+                if ("close".equals(gui[0])) {
+                    mc.displayGuiScreen(null);
+                } else if ("library".equals(gui[0])) {
+                    // select "q=<word>": open with that search text instead of selecting a note
+                    boolean q = gui[2].startsWith("q=");
+                    GuiLibrary lib = new GuiLibrary(gui[1], q ? gui[2].substring(2) : "");
+                    mc.displayGuiScreen(lib);
+                    if (!q && !gui[2].isEmpty()) lib.selectFirstMatching(gui[2]);
+                } else {
+                    mc.displayGuiScreen(new GuiTaskWall(gui[1], gui[2].isEmpty() ? null : gui[2]));
+                }
+                AgentCraftGTNH.LOG.info("DevShots: devgui {} '{}' '{}'", gui[0], gui[1], gui[2]);
+            }
             if (pendingShot != null && --pendingDelay <= 0) {
                 String name = pendingShot;
                 pendingShot = null;

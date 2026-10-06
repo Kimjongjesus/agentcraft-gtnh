@@ -29,6 +29,7 @@ import net.minecraftforge.common.DimensionManager;
 
 import dev.agentcraft.gtnh.CommonProxy;
 import dev.agentcraft.gtnh.Config;
+import dev.agentcraft.gtnh.block.BlockAgentCraft;
 import dev.agentcraft.gtnh.block.TileAgentCraft;
 import dev.agentcraft.gtnh.bridge.ForemanBridge;
 import dev.agentcraft.gtnh.entity.EntityHermesAgent;
@@ -37,7 +38,9 @@ import dev.agentcraft.gtnh.hq.HqAnchors;
 import dev.agentcraft.gtnh.hq.StationAssigner;
 import dev.agentcraft.gtnh.net.Net;
 import dev.agentcraft.gtnh.server.AgentWorldSync;
+import dev.agentcraft.gtnh.server.BoardSync;
 import dev.agentcraft.gtnh.state.AgentInfo;
+import dev.agentcraft.gtnh.state.HqData;
 
 /**
  * /agentcraft (op level 2; also from the server console):
@@ -57,7 +60,7 @@ import dev.agentcraft.gtnh.state.AgentInfo;
  */
 public class CommandAgentCraft extends CommandBase {
 
-    private static final String USAGE = "/agentcraft <status|agents|anchor|bind|give>";
+    private static final String USAGE = "/agentcraft <status|agents|board|anchor|bind|give|cap|help>";
 
     @Override
     public String getCommandName() {
@@ -105,9 +108,64 @@ public class CommandAgentCraft extends CommandBase {
             case "status":
                 status(sender);
                 return;
+            case "board":
+            case "boards":
+                board(sender);
+                return;
+            case "help":
+                help(sender);
+                return;
             default:
                 throw new WrongUsageException(USAGE);
         }
+    }
+
+    private static void help(ICommandSender s) {
+        say(s, "\u00a76[AgentCraft] read-only HQ view of Hermes (op level 2):");
+        say(s, " status | agents | board          link, NPCs, task wall / library data");
+        say(s, " anchor set|remove|list|tp|missing|show|reload   station spots (NPCs)");
+        say(s, " give monitor|lamp|beacon|taskwall|library|atrium [n]");
+        say(s, " bind <agent|fleet|clear> [w h]   monitor (w h = screen size) / lamp, at the crosshair");
+        say(s, " bind <board|all|clear> [w h]     task wall / atrium / library (board slug, all = every board)");
+        say(s, " bind overflow                    a vanilla sign: +N more agents");
+        say(s, " bind ... <x> <y> <z> [w h]       console form; cap <0..64> NPC cap until restart");
+        say(s, " Right-click a task wall / atrium (cards + details) or library (notes): read-only screens.");
+    }
+
+    private static void board(ICommandSender sender) {
+        BoardSync b = CommonProxy.sync.board;
+        say(
+            sender,
+            "[AgentCraft] board data: tasks=" + b.tasks()
+                .size()
+                + " goals="
+                + b.goals()
+                    .size()
+                + " notes="
+                + b.notes()
+                    .size()
+                + " | adapter msgs task="
+                + b.taskMessages
+                + " goal="
+                + b.goalMessages
+                + " memory="
+                + b.memoryMessages
+                + " | blobs board="
+                + b.boardBlobs
+                + " ("
+                + b.lastBoardBytes
+                + " B) library="
+                + b.libraryBlobs
+                + " ("
+                + b.lastLibraryBytes
+                + " B) packets="
+                + b.blobPackets
+                + " droppedTasks="
+                + b.droppedTasks);
+        for (HqData.Goal g : b.goals()
+            .values()) say(sender, "  " + g.board + ": " + BlockAgentCraft.summaryLine(g));
+        if (b.goals()
+            .size() > 1) say(sender, "  " + BlockAgentCraft.summaryLine(b.summary("all")));
     }
 
     // ---- status / agents ------------------------------------------------------------------
@@ -429,14 +487,23 @@ public class CommandAgentCraft extends CommandBase {
             return;
         }
         String binding = "clear".equals(what) ? "" : what;
-        if (!binding.isEmpty() && !"fleet".equals(binding) && !CommonProxy.sync.agents()
+        Block block = world.getBlock(x, y, z);
+        boolean boardBlock = te instanceof TileAgentCraft.TaskWall || te instanceof TileAgentCraft.Library;
+        if (boardBlock) {
+            // task wall / atrium / library: a board slug, or "all" (= every board, also the default)
+            if ("fleet".equals(binding)) binding = "all";
+            if (!binding.isEmpty() && !"all".equals(binding) && !CommonProxy.sync.board.boards()
+                .contains(binding)) {
+                say(sender, "\u00a7e[AgentCraft] note: no board '" + binding + "' in the current snapshot (bound anyway); boards: " + String.join(", ", CommonProxy.sync.board.boards()));
+            }
+        } else if (!binding.isEmpty() && !"fleet".equals(binding) && !CommonProxy.sync.agents()
             .containsKey(binding)) {
             say(sender, "\u00a7e[AgentCraft] note: no agent '" + binding + "' in the current snapshot (bound anyway)");
         }
         int w = args.length > rest ? parseIntBounded(sender, args[rest], 1, 8) : 0;
         int h = args.length > rest + 1 ? parseIntBounded(sender, args[rest + 1], 1, 6) : 0;
         ((TileAgentCraft) te).setBinding(binding, w, h);
-        Block block = world.getBlock(x, y, z);
+        boolean screen = te instanceof TileAgentCraft.Monitor || te instanceof TileAgentCraft.TaskWall;
         say(
             sender,
             "[AgentCraft] " + block.getLocalizedName()
@@ -447,8 +514,8 @@ public class CommandAgentCraft extends CommandBase {
                 + " "
                 + z
                 + " now shows "
-                + (binding.isEmpty() ? "nothing (unbound)" : binding)
-                + (te instanceof TileAgentCraft.Monitor ? " (" + ((TileAgentCraft) te).screenW + "x" + ((TileAgentCraft) te).screenH + " screen)" : ""));
+                + (binding.isEmpty() ? (boardBlock ? "all boards" : "nothing (unbound)") : "all".equals(binding) ? "all boards" : binding)
+                + (screen ? " (" + ((TileAgentCraft) te).screenW + "x" + ((TileAgentCraft) te).screenH + " screen)" : ""));
     }
 
     private static boolean isInt(String s) {
@@ -470,7 +537,7 @@ public class CommandAgentCraft extends CommandBase {
     // ---- give -----------------------------------------------------------------------------
 
     private void give(ICommandSender sender, String[] args) {
-        if (args.length < 2) throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon> [count]");
+        if (args.length < 2) throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon|taskwall|library|atrium> [count]");
         EntityPlayerMP p = getCommandSenderAsPlayer(sender);
         Block b;
         switch (args[1].toLowerCase(Locale.ROOT)) {
@@ -483,8 +550,18 @@ public class CommandAgentCraft extends CommandBase {
             case "beacon":
                 b = CommonProxy.beacon;
                 break;
+            case "taskwall":
+            case "wall":
+                b = CommonProxy.taskWall;
+                break;
+            case "library":
+                b = CommonProxy.library;
+                break;
+            case "atrium":
+                b = CommonProxy.atrium;
+                break;
             default:
-                throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon> [count]");
+                throw new WrongUsageException("/agentcraft give <monitor|lamp|beacon|taskwall|library|atrium> [count]");
         }
         int n = args.length >= 3 ? parseIntBounded(sender, args[2], 1, 64) : 1;
         p.inventory.addItemStackToInventory(new ItemStack(b, n));
@@ -497,7 +574,7 @@ public class CommandAgentCraft extends CommandBase {
     @Override
     @SuppressWarnings("rawtypes")
     public List addTabCompletionOptions(ICommandSender sender, String[] args) {
-        if (args.length == 1) return getListOfStringsMatchingLastWord(args, "status", "agents", "anchor", "bind", "give", "cap");
+        if (args.length == 1) return getListOfStringsMatchingLastWord(args, "status", "agents", "board", "anchor", "bind", "give", "cap", "help");
         if (args.length == 2 && "anchor".equalsIgnoreCase(args[0])) {
             return getListOfStringsMatchingLastWord(args, "set", "remove", "list", "tp", "missing", "show", "reload");
         }
@@ -523,11 +600,12 @@ public class CommandAgentCraft extends CommandBase {
             List<String> names = new ArrayList<>(
                 CommonProxy.sync.agents()
                     .keySet());
-            Collections.addAll(names, "fleet", "overflow", "clear");
+            names.addAll(CommonProxy.sync.board.boards());
+            Collections.addAll(names, "fleet", "all", "overflow", "clear");
             return getListOfStringsFromIterableMatchingLastWord(args, names);
         }
         if (args.length == 2 && "give".equalsIgnoreCase(args[0])) {
-            return getListOfStringsMatchingLastWord(args, "monitor", "lamp", "beacon");
+            return getListOfStringsMatchingLastWord(args, "monitor", "lamp", "beacon", "taskwall", "library", "atrium");
         }
         return null;
     }

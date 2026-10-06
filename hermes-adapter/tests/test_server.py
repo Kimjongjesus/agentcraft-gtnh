@@ -71,7 +71,9 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(snap["v"], 1)
         for k in ("foreman", "agents", "tasks", "decisions", "repos", "memory", "goals", "feed", "logs"):
             self.assertIn(k, snap)
-        self.assertNotIn("goal", snap)
+        # card 3: one goal per board; the current goal is the most recently active board
+        self.assertEqual(snap["goal"]["id"], "board-homelab")
+        self.assertEqual([g["id"] for g in snap["goals"]], ["board-homelab"])
         ack = c.recv()
         self.assertEqual(ack, {"v": 1, "type": "ack", "re": "h1", "ok": True})
         c.close()
@@ -119,6 +121,30 @@ class ServerTest(unittest.TestCase):
         self.assertEqual(got["agent"]["activity"], "[withheld: mentions personal notes]")
         self.assertIsNotNone(got["task"], "task.upsert arrived")
         self.assertIn("--password [redacted]", got["task"]["description"])
+
+    def test_live_goal_and_library_upserts_are_filtered(self):
+        """Card 3: goal.upsert and memory.upsert arrive over the wire and carry no canaries."""
+        c = self.client()
+        c.send({"type": "hello", "modVersion": "test", "protocol": 1})
+        c.recv()
+        canary = "SYNTHETIC" + "_SECRET_CANARY"
+        now = int(time.time())
+        self.f.comment("t_build", "claude-builder", f"PLAN: ship it with --token {canary}", at=now)
+        self.f.sql("UPDATE tasks SET status='done', completed_at=? WHERE id='t_build'", (now,))
+        seen: list[dict] = []
+        end = time.time() + 6
+        while time.time() < end and not ({"goal.upsert", "memory.upsert"} <= {m["type"] for m in seen}):
+            try:
+                seen.append(c.recv(timeout=max(0.1, end - time.time())))
+            except Exception:
+                break
+        c.close()
+        goal = [m["goal"] for m in seen if m["type"] == "goal.upsert"]
+        mem = [m["entry"] for m in seen if m["type"] == "memory.upsert" and m["entry"]["id"] == "claude-builder/plan-t_build"]
+        self.assertTrue(goal and goal[-1]["counts"]["done"] == 2, goal)
+        self.assertTrue(mem, [m["type"] for m in seen])
+        self.assertIn("--token [redacted]", mem[-1]["body"])
+        self.assertNotIn("SYNTHETIC", json.dumps(seen))
 
     def test_mutations_are_refused(self):
         c = self.client()

@@ -2,3 +2,6 @@ entity.agentcraftgtnh.hermes_agent.name=Hermes Agent
 tile.agentcraftgtnh.monitor.name=Agent Monitor
 tile.agentcraftgtnh.lamp.name=Agent Status Lamp
 tile.agentcraftgtnh.beacon.name=Fleet Beacon
+tile.agentcraftgtnh.taskwall.name=Task Wall
+tile.agentcraftgtnh.library.name=Agent Library
+tile.agentcraftgtnh.atrium.name=Goal Atrium

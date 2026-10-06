@@ -11,6 +11,7 @@ touches the real Hermes. Run the adapter against it with ``--hermes-home <dir>/.
     python3 scripts/demo_hq.py <dir> unblock       # everyone waiting is answered -> fleet working
     python3 scripts/demo_hq.py <dir> crash         # Sonnet's run crashes -> error lamp/beacon
     python3 scripts/demo_hq.py <dir> all-idle      # every run ends cleanly -> fleet idle
+    python3 scripts/demo_hq.py <dir> wall-move     # card 3: cards change columns, new plan note
 """
 
 from __future__ import annotations
@@ -100,7 +101,73 @@ def init(root: Path) -> None:
     b.task("t_old", "Fleet drift audit", "done", "claude-builder-mega")
     b.run("t_old", "claude-builder-mega", status="done", started=now - 7200, ended=now - 3600, outcome="completed",
           summary="audit clean")
+    _card3_board(home, b, now)
     log(f"init: fixture at {home}")
+
+
+def _card3_board(home: Path, b: BoardFixture, now: int) -> None:
+    """Card 3: enough cards in every wall column, library notes and a second board (generic titles)."""
+    b.comment("t_old", "claude-builder-mega", "HANDOFF: audit finished, nothing drifted.\nNext: re-run after the "
+              "next host change.\n\nChecked: every guest config against the docs, backup jobs, open ports.", at=now - 3500)
+    b.comment("t_review", "sol-reviewer", "PASS: retention math checks out; tiers keep 7 daily, 4 weekly, 6 monthly.",
+              at=now - 40)
+    # todo
+    b.task("t_arena", "Game project: boss arena lighting", "todo", "claude-builder-mega", priority=40)
+    b.task("t_guide", "Docs: HQ placement guide for the task wall", "ready", "astra-ultimate", priority=30,
+           body="Write a short guide: where to put the task wall, library and atrium, and how to bind them.")
+    b.task("t_saves", "Game project: save-file migration", "todo", None, priority=20,
+           body="Migrate old save files to the new format. Needs the level polish card first.")
+    b.link("t_samops", "t_saves")
+    b.task("t_copy", "Website: landing page copy", "triage", "luna-reviewer", priority=10)
+    # review
+    b.task("t_inv", "Game project: inventory UI pass", "review", "claude-builder-sonnet", priority=55,
+           body="Tidy the inventory screen: bigger slots, readable counts, controller hints.")
+    rid = b.run("t_inv", "claude-builder-sonnet", status="done", started=now - 5000, ended=now - 4000,
+                outcome="review_requested", summary="Inventory slots 20% bigger, counts outlined, hints added.")
+    b.event("t_inv", "review_requested", {"summary": "inventory pass ready"}, run_id=rid, at=now - 4000)
+    b.comment("t_inv", "claude-builder-sonnet", "PLAN: 1) slot size 2) count outline 3) controller hints\n"
+              "Keep the old layout behind a setting for one release.", at=now - 4900)
+    # blocked (a question for Eli)
+    b.task("t_music", "Game project: music licensing", "blocked", "astra-ultimate", block_kind="needs_input",
+           priority=35)
+    b.event("t_music", "blocked", {"reason": "QUESTION q1: use the free track pack or commission one? "
+                                   "|| CHOICES: Free pack | Commission", "kind": "needs_input"}, at=now - 200)
+    # done (summaries feed the library)
+    for tid, title, prof, summ in (
+        ("t_backup", "Backup job: weekly verify", "claude-builder", "Weekly restore test added; last run restored 3 "
+         "sample files and compared checksums."),
+        ("t_subs", "Media server: subtitle fix", "claude-builder-sonnet", "Subtitles default to English again; "
+         "forced tracks kept."),
+    ):
+        b.task(tid, title, "done", prof)
+        b.sql("UPDATE tasks SET completed_at=? WHERE id=?", (now - 1800, tid))
+        b.run(tid, prof, status="done", started=now - 2400, ended=now - 1800, outcome="completed", summary=summ)
+    # a second board: separate goal on the atrium
+    o = BoardFixture(home / "kanban" / "boards" / "ai-ops" / "kanban.db", now)
+    o.task("t_report", "Nightly report: tidy formatting", "running", "qwen-uncensored", priority=20)
+    o.run("t_report", "qwen-uncensored", started=now - 300, hb=now)
+    o.task("t_logs", "Cron: rotate logs", "done", "astra-ultimate")
+    o.run("t_logs", "astra-ultimate", status="done", started=now - 3000, ended=now - 2000, outcome="completed",
+          summary="Logs rotate weekly, 8 kept.")
+    o.task("t_alerts", "Alerts: quiet hours", "todo", "claude-builder", priority=15)
+
+
+def wall_move(root: Path) -> None:
+    """Card 3: cards move between columns (wall/atrium update within seconds) and a new plan note."""
+    b = board(root)
+    t = int(time.time())
+    rid = run_id(b, "t_samops")
+    b.sql("UPDATE task_runs SET status='done', ended_at=?, outcome='review_requested', summary=? WHERE id=?",
+          (t, "Level 3 polish: ramps smoothed, two new checkpoints.", rid))
+    b.sql("UPDATE tasks SET status='review' WHERE id='t_samops'")
+    b.event("t_samops", "review_requested", {"summary": "level polish ready"}, run_id=rid, at=t)
+    b.sql("UPDATE tasks SET status='running' WHERE id='t_guide'")
+    rid = b.run("t_guide", "astra-ultimate", started=t, hb=t)
+    b.event("t_guide", "claimed", {"run_id": rid}, run_id=rid, at=t)
+    b.comment("t_guide", "astra-ultimate", "PLAN: one page per block, with a screenshot each.\n"
+              "1) task wall 2) library 3) atrium 4) binding cheatsheet", at=t + 1)
+    b.sql("UPDATE tasks SET status='done', completed_at=? WHERE id='t_inv'", (t,))
+    log("wall-move: level polish -> review, placement guide -> doing, inventory pass -> done")
 
 
 def progress(root: Path) -> None:
@@ -156,7 +223,7 @@ def all_idle(root: Path) -> None:
 
 
 PHASES = {"init": init, "progress": progress, "demo-ready": demo_ready, "unblock": unblock, "crash": crash,
-          "all-idle": all_idle}
+          "all-idle": all_idle, "wall-move": wall_move}
 
 
 def main() -> int:

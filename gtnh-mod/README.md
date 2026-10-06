@@ -11,7 +11,8 @@ Scope so far (read-only: nothing in the game can change Hermes):
 - card 2 (this branch): every agent as an NPC, an HQ that **Eli builds himself** and wires up with
   anchors, agents walking between stations, desk monitors with log tails, a "waiting on Eli" marker,
   status lamps and a fleet beacon. The mod never generates, places or breaks blocks in the world.
-- card 3 (later): task wall, library and atrium GUIs.
+- card 3: a task wall, a library and goal atrium panels (read-only screens), bound to boards like
+  the monitors are bound to agents.
 
 ## How it works
 
@@ -146,11 +147,60 @@ A monitor belongs at the agent's desk, but the binding is by agent id, so it can
 is drawn client-side only within `monitorRenderDistance` blocks and changes only when a new log line
 or state arrives.
 
+### 4. Task wall, library, goal atrium (card 3, read-only)
+
+Three more blocks in the Decorations tab (or `/agentcraft give taskwall|library|atrium [count]`):
+
+| block | bind to | shows |
+|---|---|---|
+| **Task Wall** (faces you) | a board slug, or `all` (default) | the Kanban as five columns `todo / doing / review / done / blocked` (cancelled hidden; the adapter maps Hermes `triage`/`ready` to todo and `running` to doing). Each card: title (two lines, truncated), assignee in its agent colour, priority hint `P80`, `→N` when it depends on N cards. A column with more cards than fit flips pages every `wallPageSeconds`. |
+| **Goal Atrium** (faces you) | a board slug, or `all` | a progress ring (done / total of that board), counts of todo, doing, review and blocked, and "N decisions need you" (count only). |
+| **Agent Library** | a board slug, or `all` | a book block; the screen lists the library notes (below). |
+
+Right-click any of them for its screen. The **task wall screen** lists every card with column filter
+buttons; clicking a card shows its detail (description, dependencies, assignee, status, board). The
+**library screen** has a search box (matches title and text) and a scrolling text view. Nothing on
+these screens changes Hermes: no console, no answering decisions, no task actions (P3).
+
+Bind exactly like a monitor: look at the block (or use the console form) and
+
+```
+/agentcraft bind all 5 3        # task wall: 5x3-block screen (w 1..8, h 1..6), every board
+/agentcraft bind homelab 3 3    # atrium for one board, 3x3 panel
+/agentcraft bind all            # library: every board's notes
+/agentcraft bind clear          # back to the default (all boards)
+/agentcraft bind homelab <x> <y> <z> [w h]   # console form
+/agentcraft board               # what the server holds: tasks, goals, notes, blob sizes, per-board summary
+```
+
+Build them as Eli likes: the screen is drawn on the block's front face, centred left-right on the
+block and growing upward from its bottom edge (`w x h` blocks), so put the Task Wall block in the
+middle of the bottom row of a wall of any blocks; an
+atrium panel on a pillar or floor wall, the library on a lectern. Bindings are saved with the block,
+so a server restart keeps them (verified: wall still bound after a restart with no re-bind).
+
+The **Fleet Beacon** keeps its card-2 beam and now also shows the all-boards summary as a floating
+label above it (within `wallRenderDistance`) and in chat on right-click
+("All boards: 3 todo, 2 doing, 1 review, 2 blocked, 4/12 done (33%), 2 decisions need you").
+
+Library notes come only from text the adapter already filters for the monitors and plates (agents'
+`PLAN:` / `HANDOFF:` / review-verdict comments, the 12 newest done cards' summaries, a per-board
+overview, open decision questions). Each is privacy-filtered as a whole before it is cut. Hermes
+memory files, `personal-*.md`, cron prompts, profile configs and human comments are never sources;
+see `../hermes-adapter/MAPPING.md` ("Library").
+
+Data path: the adapter's `task.upsert`, `goal.upsert` and `memory.upsert` messages go into
+`server/BoardSync`, which keeps at most 256 tasks (cancelled, then the oldest done cards dropped
+first), 16 goals and 64 notes, and sends two binary blobs (board, library) over the existing
+`agentcraftgtnh` channel in 30 kB parts, at most once per `boardSyncSeconds` (2) and only when the
+bytes changed; a blob is capped at 512 kB. Players who log in get the current blobs. The client
+(`state/ClientHq`) only reads them; the screens keep scroll and filter state locally.
+
 ### Other commands
 
 `/agentcraft status` (link, counters, anchors, every NPC with position, target and tracked flag),
-`/agentcraft agents` (every agent with station, spot and waiting marker), `/agentcraft cap <0..64>`
-(NPC cap until the next restart).
+`/agentcraft agents` (every agent with station, spot and waiting marker), `/agentcraft board`
+(card-3 data), `/agentcraft cap <0..64>` (NPC cap until the next restart).
 
 ## Config (`config/agentcraftgtnh.cfg`)
 
@@ -159,6 +209,7 @@ or state arrives.
   no-anchors fallback row: `spacing`, `spawnAtWorldSpawn`, `spawnDimension`, `spawnX/Y/Z`.
 - `hq`: `anchorsFile`, `monitorLines` (9), `monitorRenderDistance` (24), `teleportAfterSeconds`
   (12), `walkSpeed` (0.3).
+- `interface` (card 3): `boardSyncSeconds` (2), `wallRenderDistance` (32), `wallPageSeconds` (8).
 
 The dev-copy settings are in `dev/agentcraftgtnh.dev.cfg`.
 
