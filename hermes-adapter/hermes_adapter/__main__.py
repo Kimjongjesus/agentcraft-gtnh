@@ -3,7 +3,7 @@
 Defaults are loopback-only. To let the gaming-spare test server connect, bind the LAN address
 and allow that one peer explicitly, e.g.:
 
-    python3 -m hermes_adapter --bind 192.168.0.161 --allow-peer 192.168.0.222
+    python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20
 """
 
 from __future__ import annotations

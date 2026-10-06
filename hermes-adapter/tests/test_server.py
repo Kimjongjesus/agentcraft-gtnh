@@ -177,13 +177,13 @@ class PolicyTest(unittest.TestCase):
         p = AccessPolicy()
         self.assertTrue(p.peer_ok("127.0.0.1"))
         self.assertTrue(p.peer_ok("::ffff:127.0.0.1"))
-        self.assertFalse(p.peer_ok("192.168.0.222"))
-        p.allowed_peers.append(ipaddress.ip_network("192.168.0.222/32"))
-        self.assertTrue(p.peer_ok("192.168.0.222"))
-        self.assertFalse(p.peer_ok("192.168.0.50"))
+        self.assertFalse(p.peer_ok("192.0.2.20"))
+        p.allowed_peers.append(ipaddress.ip_network("192.0.2.20/32"))
+        self.assertTrue(p.peer_ok("192.0.2.20"))
+        self.assertFalse(p.peer_ok("192.0.2.50"))
 
     def test_host_only(self):
-        self.assertEqual(AccessPolicy.host_only("192.168.0.161:7878"), "192.168.0.161")
+        self.assertEqual(AccessPolicy.host_only("192.0.2.10:7878"), "192.0.2.10")
         self.assertEqual(AccessPolicy.host_only("[::1]:7878"), "[::1]")
         self.assertEqual(AccessPolicy.host_only("LOCALHOST"), "localhost")
 
@@ -191,10 +191,10 @@ class PolicyTest(unittest.TestCase):
         from hermes_adapter.__main__ import build_policy, parse_args
         with self.assertRaises(SystemExit):
             build_policy(parse_args(["--bind", "0.0.0.0"]))
-        pol = build_policy(parse_args(["--bind", "192.168.0.161", "--allow-peer", "192.168.0.222"]))
-        self.assertIn("192.168.0.161", pol.allowed_hosts)
-        self.assertTrue(pol.peer_ok("192.168.0.222"))
-        self.assertFalse(pol.peer_ok("192.168.0.10"))
+        pol = build_policy(parse_args(["--bind", "192.0.2.10", "--allow-peer", "192.0.2.20"]))
+        self.assertIn("192.0.2.10", pol.allowed_hosts)
+        self.assertTrue(pol.peer_ok("192.0.2.20"))
+        self.assertFalse(pol.peer_ok("192.0.2.99"))
 
 
 if __name__ == "__main__":

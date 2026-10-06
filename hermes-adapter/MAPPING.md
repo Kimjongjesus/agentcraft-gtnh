@@ -166,6 +166,6 @@ Default bind `127.0.0.1:7878`, loopback peers and loopback Host headers only. An
 (including `null`) is refused with 401, as upstream does. A wildcard bind is refused. For the
 gaming-spare test server:
 
-    python3 -m hermes_adapter --bind 192.168.0.161 --allow-peer 192.168.0.222
+    python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20
 
-which accepts only that one peer IP, with Host `192.168.0.161[:port]` or loopback names.
+which accepts only that one peer IP, with Host `192.0.2.10[:port]` or loopback names.

@@ -12,7 +12,7 @@ After=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=%h/agentcraft-gtnh/hermes-adapter
-ExecStart=/usr/bin/python3 -m hermes_adapter --bind 192.168.0.161 --port 7878 --allow-peer 192.168.0.222 --poll 3
+ExecStart=/usr/bin/python3 -m hermes_adapter --bind 192.0.2.10 --port 7878 --allow-peer 192.0.2.20 --poll 3
 Restart=on-failure
 RestartSec=10
 # read-only by design. ProtectHome=read-only is deliberately NOT set: SQLite readers of a WAL
