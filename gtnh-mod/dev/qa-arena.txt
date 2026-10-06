@@ -1,0 +1,50 @@
+# Throwaway QA arena for the card-2 screenshots. DEV/QA servers ONLY (RFG FLAT world, or the
+# GTNH dev copy); never the real world. Lines are server console commands, fed in order by
+#   while read -r l; do case "$l" in ''|'#'*) ;; *) dev/run-hq-qa.sh cmd "$l"; sleep 0.3;; esac; done < dev/qa-arena.txt
+# Origin: the FLAT world's spawn is (-56, 4, -246); the arena sits 10 blocks south of it, feet y=4.
+gamerule doMobSpawning false
+gamemode 1 Developer
+# three desks: monitor blocks facing south (meta 3), the agent stands 1.5 blocks in front
+setblock -56 4 -237 agentcraftgtnh:monitor 3
+setblock -51 4 -237 agentcraftgtnh:monitor 3
+setblock -46 4 -237 agentcraftgtnh:monitor 3
+setblock -54 4 -237 agentcraftgtnh:status_lamp
+setblock -49 4 -237 agentcraftgtnh:status_lamp
+setblock -44 4 -237 agentcraftgtnh:status_lamp
+# library corner (decor) and the fleet beacon
+setblock -38 4 -231 bookshelf
+setblock -38 4 -230 bookshelf
+setblock -38 4 -229 bookshelf
+setblock -38 5 -230 bookshelf
+setblock -62 4 -226 agentcraftgtnh:fleet_beacon
+# Eli's overflow sign (a plain vanilla sign; the mod only rewrites its text)
+setblock -60 4 -228 standing_sign 0
+# glass under the elevated overview camera
+setblock -52 9 -213 glass
+# bindings (Eli does these by looking at the block; the console form takes coordinates)
+agentcraft bind claude-builder -56 4 -237
+agentcraft bind claude-builder-sonnet -51 4 -237
+agentcraft bind sol-reviewer -46 4 -237
+agentcraft bind claude-builder -54 4 -237
+agentcraft bind claude-builder-sonnet -49 4 -237
+agentcraft bind fleet -44 4 -237
+agentcraft bind overflow -60 4 -228
+# station anchors (terminal deliberately left out: missing-anchor fallback first)
+agentcraft anchor set desk_claude-builder -55.5 4 -234.5 north
+agentcraft anchor set desk -50.5 4 -234.5 north
+agentcraft anchor set desk_2 -45.5 4 -234.5 north
+agentcraft anchor set library -40.5 4 -231.5 east
+agentcraft anchor set library_2 -40.5 4 -228.5 east
+agentcraft anchor set user -62.5 4 -232.5 east
+agentcraft anchor set user_2 -62.5 4 -230 east
+agentcraft anchor set lounge -56.5 4 -222.5 north
+agentcraft anchor set lounge_2 -54 4 -222.5 north
+agentcraft anchor set lounge_3 -51.5 4 -222.5 north
+agentcraft anchor set lounge_4 -49 4 -222.5 north
+# QA cameras: feet position, yaw, pitch
+agentcraft anchor set cam_overview -51.5 10 -212.5 180 32
+agentcraft anchor set cam_desks -50.5 4 -227.5 180 6
+agentcraft anchor set cam_monitor -51.8 4 -232.2 136 7
+agentcraft anchor set cam_user -57.5 4 -230.5 90 6
+agentcraft anchor set cam_lounge -51.5 4 -215 180 12
+agentcraft anchor set cam_beacon -54 4 -198 165 -18

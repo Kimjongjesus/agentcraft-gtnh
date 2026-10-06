@@ -1,5 +1,10 @@
 <div align="center">
 
+> **This fork (Kimjongjesus/agentcraft-gtnh)** adds a GT New Horizons (Forge 1.7.10) take on AgentCraft
+> that shows Hermes agents from ai-ops: [`gtnh-mod/`](gtnh-mod/README.md) (the mod) and
+> [`hermes-adapter/`](hermes-adapter/README.md) (a read-only Foreman-protocol server over Hermes).
+> Everything below is the upstream project, unchanged.
+
 # AgentCraft
 
 **A team of Claude agents doing real work on your code, inside a Minecraft studio you can walk around in.**

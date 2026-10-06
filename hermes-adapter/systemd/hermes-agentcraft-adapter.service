@@ -1,0 +1,29 @@
+# systemd --user unit for the read-only Hermes -> AgentCraft adapter.
+#
+# NOT installed or enabled by the build. To deploy (Eli's call), copy to
+# ~/.config/systemd/user/hermes-agentcraft-adapter.service, adjust the paths/peer, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now hermes-agentcraft-adapter
+#
+# It binds ai-ops' LAN address and admits exactly one peer (the gaming-spare test server).
+[Unit]
+Description=AgentCraft adapter: read-only Hermes state over the AgentCraft WebSocket protocol
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/agentcraft-gtnh/hermes-adapter
+ExecStart=/usr/bin/python3 -m hermes_adapter --bind 192.168.0.161 --port 7878 --allow-peer 192.168.0.222 --poll 3
+Restart=on-failure
+RestartSec=10
+# read-only by design. ProtectHome=read-only is deliberately NOT set: SQLite readers of a WAL
+# database still need to update the -shm file, so a read-only home would break the kanban reads
+# (the adapter opens every DB with mode=ro + query_only instead). Untested as a unit: verify on
+# install with `journalctl --user -u hermes-agentcraft-adapter`.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+MemoryMax=256M
+CPUQuota=25%
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,21 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "Read-only in-world view of Hermes agents (ai-ops) over the AgentCraft protocol. GTNH-native reimplementation of the idea of blendi-remade/agentcraft (MIT).",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "https://github.com/Kimjongjesus/agentcraft-gtnh",
+		"updateUrl": "",
+		"authorList": ["Kimjongjesus"],
+		"credits": "AgentCraft idea and protocol: blendi-remade/agentcraft (MIT). Build template: GTNewHorizons/ExampleMod1.7.10 (MIT).",
+		"logoFile": "",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": [],
+		"dependencies": [],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}

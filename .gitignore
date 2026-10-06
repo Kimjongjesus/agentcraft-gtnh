@@ -17,3 +17,6 @@ foreman/scratch/
 mod/.gradle/
 mod/build/
 .claude/
+
+# hermes-adapter: symlink to foreman/node_modules for upstream checks
+hermes-adapter/node_modules

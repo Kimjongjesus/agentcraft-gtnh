@@ -1,0 +1,4 @@
+entity.agentcraftgtnh.hermes_agent.name=Hermes Agent
+tile.agentcraftgtnh.monitor.name=Agent Monitor
+tile.agentcraftgtnh.lamp.name=Agent Status Lamp
+tile.agentcraftgtnh.beacon.name=Fleet Beacon
