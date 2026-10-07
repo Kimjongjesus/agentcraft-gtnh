@@ -1,4 +1,4 @@
-"""``ops.*``: AI-ops feeds (fleet health, scheduled jobs, provider usage, alerts) for AgentCraft.
+"""``ops.*``: AI operations feeds (fleet health, scheduled jobs, provider usage, alerts) for AgentCraft.
 
 The adapter does not know any real monitoring system. It runs *ops sources*: small plugins that
 return plain dicts (see :class:`OpsSource` and ``../OPS-PLUGINS.md``). Everything a source returns

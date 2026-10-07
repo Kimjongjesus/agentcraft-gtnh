@@ -21,7 +21,7 @@ import dev.agentcraft.gtnh.ui.PlateDeclutter;
  * <ul>
  * <li>agents standing on the same spot (closer than {@link #SAME_SPOT} blocks, e.g. when the server
  * found no free cell) collapse into ONE plate, the lowest entity id's, with a "+N here" count pill;
- * the others draw no plate, and the "!" marker shows how many of the group wait on Eli;</li>
+ * the others draw no plate, and the "!" marker shows how many of the group wait on the player;</li>
  * <li>the remaining plates are laid out in screen space ({@link PlateDeclutter}): the plate under
  * the crosshair and then the nearest keep their spot, farther ones that would cover them shrink
  * (name + state, then name only) and/or rise by one plate height (up to {@link #TIERS} tiers), and

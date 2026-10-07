@@ -92,7 +92,7 @@ python3 -m hermes_adapter --ops-plugin ~/private/ops_plugin            # package
 python3 -m hermes_adapter --ops-plugin ~/private/ops_plugin.py         # single file
 python3 -m hermes_adapter --ops-plugin mypkg.ops                       # importable module (create_sources)
 python3 -m hermes_adapter --ops-plugin mypkg.ops:make_sources          # explicit factory
-python3 -m hermes_adapter --ops-plugin ep:homelab                      # entry point, group agentcraft_gtnh.ops_sources
+python3 -m hermes_adapter --ops-plugin ep:my_sources                      # entry point, group agentcraft_gtnh.ops_sources
 python3 -m hermes_adapter --ops-plugin ~/private/ops_plugin --ops-config ~/private/ops.json
 ```
 

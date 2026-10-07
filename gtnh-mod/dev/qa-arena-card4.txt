@@ -2,7 +2,7 @@
 # servers ONLY (RFG FLAT world); never the real world. A small waiting nook east of the arena:
 # the 'user' station sits between desk blocks (bookshelves) on every side and a back wall, open
 # to the west, so the old 1.6-block hover ring around the anchor is blocked everywhere: the
-# 'all waiting agents stacked on one spot' scene from Eli's HQ screenshots.
+# 'all waiting agents stacked on one spot' scene from the owner's HQ screenshots.
 # back wall (x = anchor + 4) and side walls (z = anchor -5 / +5), two blocks high
 setblock -27 4 -235 stonebrick
 setblock -27 4 -234 stonebrick

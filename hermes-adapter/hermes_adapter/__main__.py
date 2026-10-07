@@ -1,6 +1,6 @@
 """CLI: python3 -m hermes_adapter [options]
 
-Defaults are loopback-only. To let the gaming-spare test server connect, bind the LAN address
+Defaults are loopback-only. To let a test game server on the LAN connect, bind the LAN address
 and allow that one peer explicitly, e.g.:
 
     python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20
@@ -31,7 +31,7 @@ from typing import Any
 
 from . import redact
 from .journal import JournalError, Retention, WorldJournal
-from .mapping import Mapper
+from .mapping import CAST_FILE_NAME, Mapper, load_cast
 from .ops import OpsHub, load_plugin
 from .ops_mock import MockOpsSource
 from .server import LOOPBACK_HOSTS, AccessPolicy, AdapterServer
@@ -49,7 +49,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--port", type=int, default=7878)
     p.add_argument("--allow-host", action="append", default=[], help="extra accepted Host header value (repeatable)")
     p.add_argument("--allow-peer", action="append", default=[], help="extra client IP or CIDR allowed to connect (repeatable)")
-    p.add_argument("--hermes-home", type=Path, default=None, help="global Hermes home (default ~/.hermes)")
+    p.add_argument("--hermes-home", type=Path, default=None, help="global Hermes home (default: Hermes' standard home directory)")
     p.add_argument("--boards", default="", help="comma-separated board slugs (default: all except *scratch*)")
     p.add_argument("--source", choices=("sqlite", "cli"), default="sqlite", help="kanban source (default: read-only sqlite)")
     p.add_argument("--hermes-bin", default="hermes")
@@ -203,9 +203,14 @@ def main(argv: list[str] | None = None) -> int:
         world.close()
         print(json.dumps({"v": 1, **snap}, indent=2, ensure_ascii=False))
         return 0 if snap["source"]["state"] in ("ok", "stale", "starting") else 1
-    cast = json.loads(args.cast.read_text()) if args.cast else None
+    hermes_home = args.hermes_home or env_hermes_home()
+    cast = load_cast(args.cast) if args.cast else None
+    if cast is None and (hermes_home / CAST_FILE_NAME).is_file():
+        # the installation's private names/colours, kept next to Hermes' own config, not in this repo
+        cast = load_cast(hermes_home / CAST_FILE_NAME)
+        log.info("cast: %d profile(s) from %s", len(cast), CAST_FILE_NAME)
     source = HermesSource(
-        hermes_home=args.hermes_home or env_hermes_home(),
+        hermes_home=hermes_home,
         boards=[b.strip() for b in args.boards.split(",") if b.strip()] or None,
         kanban_source=args.source,
         hermes_bin=args.hermes_bin,

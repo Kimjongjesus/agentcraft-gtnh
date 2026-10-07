@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upstream compatibility checks for the Hermes adapter (run on ai-ops):
+# Upstream compatibility checks for the Hermes adapter (run on the agent host):
 #   1. starts the adapter on a loopback test port against the live (read-only) Hermes state,
 #   2. validates every message against upstream's zod schema (foreman/src/protocol.ts),
 #   3. connects upstream's own client, foreman/scripts/fake-mod.ts, and prints its view.

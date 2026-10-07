@@ -23,7 +23,7 @@ import dev.agentcraft.gtnh.ui.UiFont;
  * Biped NPC (Steve skin; the outfit is dyed armour in the agent colour, a gold helmet for the lead,
  * who is also drawn 10% taller) with a two-line nameplate: line 1 = status dot + name in the agent
  * colour, line 2 = "state · activity" in the status colour, and a bobbing "!" above agents waiting
- * on Eli. Data comes from the SimpleNetworkWrapper cache, falling back to the entity's DataWatcher.
+ * on the player. Data comes from the SimpleNetworkWrapper cache, falling back to the entity's DataWatcher.
  */
 public class RenderHermesAgent extends RenderBiped {
 
@@ -177,7 +177,7 @@ public class RenderHermesAgent extends RenderBiped {
     }
 
     /**
-     * The "waiting on Eli" badge: a big white "!" in a clay disc at the plate's left edge (beside the
+     * The "waiting on the player" badge: a big white "!" in a clay disc at the plate's left edge (beside the
      * plate, not above it, so stacked plates of neighbours never cover it), pulsing, with the number
      * of waiting agents when several share the spot. Display only; decisions are answered in Hermes.
      */

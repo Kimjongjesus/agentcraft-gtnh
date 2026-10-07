@@ -1,10 +1,10 @@
 # systemd --user unit for the read-only Hermes -> AgentCraft adapter.
 #
-# NOT installed or enabled by the build. To deploy (Eli's call), copy to
+# NOT installed or enabled by the build. To deploy (the owner's call), copy to
 # ~/.config/systemd/user/hermes-agentcraft-adapter.service, adjust the paths/peer, then:
 #   systemctl --user daemon-reload && systemctl --user enable --now hermes-agentcraft-adapter
 #
-# It binds ai-ops' LAN address and admits exactly one peer (the gaming-spare test server).
+# It binds the agent host's LAN address and admits exactly one peer (the test game server).
 [Unit]
 Description=AgentCraft adapter: read-only Hermes state over the AgentCraft WebSocket protocol
 After=network-online.target

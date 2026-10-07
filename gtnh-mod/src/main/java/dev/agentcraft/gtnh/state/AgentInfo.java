@@ -18,7 +18,7 @@ public final class AgentInfo {
     public String taskId = "";
     public int color = 0x9C9488;
     public boolean active = true;
-    /** Server-computed: waiting on Eli (state waiting_user/blocked, or an open decision names this agent). */
+    /** Server-computed: waiting on the player (state waiting_user/blocked, or an open decision names this agent). */
     public boolean waiting;
 
     public static AgentInfo fromJson(JsonObject o) {
@@ -111,7 +111,7 @@ public final class AgentInfo {
 
     /**
      * Fleet summary for status lamps bound to "fleet" and the roof beacon, most urgent first:
-     * someone waiting on Eli, then error, then working (incl. thinking), else idle.
+     * someone waiting on the player, then error, then working (incl. thinking), else idle.
      */
     public static String fleetFamily(Collection<AgentInfo> agents, boolean linkUp) {
         if (!linkUp) return "offline";
@@ -136,6 +136,8 @@ public final class AgentInfo {
                 return 0xD97757;
             case "error":
                 return 0xC2413B;
+            case "warn":
+                return 0xE8A93A; // card 5b: ops only (degraded service, warning alert, stale source)
             case "done":
                 return 0x8FA98B;
             case "offline":
@@ -156,6 +158,8 @@ public final class AgentInfo {
                 return "\u00a76";
             case "error":
                 return "\u00a7c";
+            case "warn":
+                return "\u00a76";
             case "done":
                 return "\u00a7a";
             default:

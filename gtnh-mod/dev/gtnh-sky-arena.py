@@ -3,13 +3,13 @@
 
 A glass platform in the sky above the dev copy's spawn (spawn chunks stay loaded), with the same
 desks / library / user / lounge layout as dev/qa-arena.txt shifted by (+40, +157, +270). It is
-NOT the HQ (Eli builds that himself) and never goes near the real Pterodactyl world.
+NOT the HQ (the player builds that by hand) and never goes near the real game server's world.
 
     python3 dev/gtnh-sky-arena.py check  > check.txt   # testforblock air over the whole volume
     python3 dev/gtnh-sky-arena.py build  > arena.txt   # platform, blocks, bindings, anchors
     python3 dev/gtnh-sky-arena.py clear  > clear.txt   # puts every arena block back to air
 
-Feed a file on gaming-spare with: grep -v '^#' FILE > ~/gtnh-dev/server/console.fifo
+Feed a file on the test PC with: grep -v '^#' FILE > "$GTNH_DEV_SERVER"/console.fifo
 """
 import sys
 
@@ -33,17 +33,17 @@ BLOCKS = [  # (x, y, z, block, meta) on top of the platform
     (-20, FEET, 42, "standing_sign", 0),
 ]
 BINDS = [
-    ("claude-builder", -16, FEET, 33),
-    ("claude-builder-sonnet", -11, FEET, 33),
-    ("sol-reviewer", -6, FEET, 33),
-    ("claude-builder", -14, FEET, 33),
-    ("claude-builder-sonnet", -9, FEET, 33),
+    ("builder-a", -16, FEET, 33),
+    ("builder-b", -11, FEET, 33),
+    ("reviewer-a", -6, FEET, 33),
+    ("builder-a", -14, FEET, 33),
+    ("builder-b", -9, FEET, 33),
     ("fleet", -4, FEET, 33),
     ("overflow", -20, FEET, 42),
 ]
 # terminal is deliberately left out first (missing-anchor fallback)
 ANCHORS = [
-    ("desk_claude-builder", -15.5, 35.5, "north"),
+    ("desk_builder-a", -15.5, 35.5, "north"),
     ("desk", -10.5, 35.5, "north"),
     ("desk_2", -5.5, 35.5, "north"),
     ("library", 0.5, 38.5, "east"),

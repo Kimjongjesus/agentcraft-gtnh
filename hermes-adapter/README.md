@@ -1,15 +1,20 @@
 # hermes-adapter
 
-Read-only bridge that shows Hermes (ai-ops) agents, kanban cards and cron jobs to AgentCraft
+Read-only bridge that shows Hermes agents, kanban cards and cron jobs to AgentCraft
 clients: the GTNH mod in `../gtnh-mod/`, upstream's `foreman/scripts/fake-mod.ts`, or anything
 else that speaks `../docs/protocol.md`. Python 3.11 standard library only (no pip installs).
 
     python3 -m hermes_adapter --once | less          # print one snapshot and exit
     python3 -m hermes_adapter                        # serve ws://127.0.0.1:7878 (loopback only)
-    python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20   # gaming-spare test server
+    python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20   # a test game server on the LAN
 
-Options: `--boards homelab,ai-ops`, `--source sqlite|cli`, `--poll 3`, `--cast cast.json`
-(`{"claude-builder": {"name": "Opus", "color": "#2E78C6"}}`), `--allow-host`, `--port`.
+Options: `--boards main,ops`, `--source sqlite|cli`, `--poll 3`, `--cast cast.json`
+(`{"builder-a": {"name": "Ada", "color": "#2E78C6"}}`), `--allow-host`, `--port`.
+
+Agent names: profiles show as their title-cased name (`builder-a` -> "Builder A"); only Hermes'
+built-ins `default` ("Lead") and `cron` ("Scheduler") have fixed names. Your own names, roles,
+titles and colours belong in a private cast file: `--cast FILE`, or `agentcraft-cast.json` in the
+Hermes home, which is picked up automatically when `--cast` is not given. Keep it out of any repo.
 
 It never writes to Hermes: every client intent (goals, messages, decision answers, task/agent
 actions, repo.add) is refused with `ack {ok:false}`. Mapping, read-only guarantees and secret
@@ -91,4 +96,4 @@ plus one small row per capture and per event; the 256 MiB cap is a backstop, not
 ## Deployment
 
 `systemd/hermes-agentcraft-adapter.service` is a `systemd --user` unit. It is **not** installed
-or enabled; that is Eli's decision.
+or enabled; that is the owner's decision.

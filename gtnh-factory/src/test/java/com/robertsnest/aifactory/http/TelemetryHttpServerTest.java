@@ -243,14 +243,14 @@ public class TelemetryHttpServerTest {
 
             @Override
             public String call() {
-                throw new IllegalStateException("ME network exploded at /home/eli/secret/path");
+                throw new IllegalStateException("ME network exploded at /home/user/secret/path");
             }
         });
 
         int[] result = get("/telemetry/snapshot", TOKEN);
         assertEquals(500, result[0]);
         String text = body("/telemetry/snapshot", TOKEN);
-        assertFalse("internals must not leak to the caller", text.contains("/home/eli"));
+        assertFalse("internals must not leak to the caller", text.contains("/home/user"));
         assertTrue(text.contains("internal error"));
     }
 

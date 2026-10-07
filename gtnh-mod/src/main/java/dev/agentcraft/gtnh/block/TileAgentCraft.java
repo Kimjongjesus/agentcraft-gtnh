@@ -10,7 +10,7 @@ import net.minecraft.util.AxisAlignedBB;
 import dev.agentcraft.gtnh.Config;
 
 /**
- * Block entity of the monitor / status lamp / beacon blocks Eli places. Holds only a binding
+ * Block entity of the monitor / status lamp / beacon blocks the player places. Holds only a binding
  * (agent id, or "fleet") and, for monitors, the screen size; saved with the block, synced to clients
  * through the vanilla description packet. It never ticks: renderers read the client agent cache.
  */
@@ -133,6 +133,56 @@ public class TileAgentCraft extends TileEntity {
 
     /** Library: no screen in the world; right-click opens the reader (binding = board filter). */
     public static class Library extends TileAgentCraft {}
+
+    /** Card 5b: an ops panel screen, bound to "all" (default) or an ops filter. */
+    public static class OpsScreen extends TileAgentCraft {
+
+        public OpsScreen(int w, int h) {
+            screenW = w;
+            screenH = h;
+            binding = "all";
+        }
+
+        @Override
+        public AxisAlignedBB getRenderBoundingBox() {
+            int r = Math.max(screenW, screenH);
+            return AxisAlignedBB.getBoundingBox(xCoord - r, yCoord - 1, zCoord - r, xCoord + r + 1, yCoord + r + 1, zCoord + r + 1);
+        }
+
+        @Override
+        public double getMaxRenderDistanceSquared() {
+            double d = Config.wallRenderDistance + 8;
+            return d * d;
+        }
+    }
+
+    public static class OpsFleet extends OpsScreen {
+
+        public OpsFleet() {
+            super(4, 3);
+        }
+    }
+
+    public static class OpsCron extends OpsScreen {
+
+        public OpsCron() {
+            super(4, 3);
+        }
+    }
+
+    public static class OpsUsage extends OpsScreen {
+
+        public OpsUsage() {
+            super(3, 2);
+        }
+    }
+
+    public static class OpsAlerts extends OpsScreen {
+
+        public OpsAlerts() {
+            super(4, 3);
+        }
+    }
 
     public static class Beacon extends TileAgentCraft {
 

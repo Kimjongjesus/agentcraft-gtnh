@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Dev/QA screenshot run (gaming-spare): a plain Forge 1.7.10 dev server + dev client from RFG,
+# Dev/QA screenshot run (test PC): a plain Forge 1.7.10 dev server + dev client from RFG,
 # both with this mod, no GTNH modpack. The client runs inside a private headless mutter
 # compositor (its own dbus session, virtual monitor, Xwayland), auto-joins the dev server,
 # aims at the agent NPC and saves screenshots (DevShots), then quits.

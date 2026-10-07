@@ -15,7 +15,7 @@ LAN_IP = "192." + "168." + "77.5"
 TOKEN = "sk-" + "ant-api03-" + "CanaryCanaryCanary0123456789"
 GH = "gh" + "p_" + "CANARYcanaryCANARY0123456789abcd"
 PERSONAL = "see personal-" + "health.md"
-CANARIES = (LAN_IP, "10.20.30.40", "2001:db8::77", TOKEN, GH, "hunter2", "health.md", "secret-topic-canary", "eli@example.com")
+CANARIES = (LAN_IP, "10.20.30.40", "2001:db8::77", TOKEN, GH, "hunter2", "health.md", "secret-topic-canary", "owner@example.com")
 
 
 class FakeClock:
@@ -163,7 +163,7 @@ class NormalizeTest(unittest.TestCase):
     def test_every_string_is_filtered(self):
         """Canaries in every string field of every kind (and in unknown fields) never survive."""
         def dirty(i):
-            return f"{TOKEN} {GH} https://bob:hunter2@{LAN_IP}/x {LAN_IP} 10.20.30.40 2001:db8::77 eli@example.com /home/u/.env #{i}"
+            return f"{TOKEN} {GH} https://bob:hunter2@{LAN_IP}/x {LAN_IP} 10.20.30.40 2001:db8::77 owner@example.com /home/u/.env #{i}"
         raw = {
             "services": [{"id": dirty(1), "name": dirty(2), "group": dirty(3), "detail": dirty(4), "state": "up",
                           "extra": "secret-topic-canary"}],

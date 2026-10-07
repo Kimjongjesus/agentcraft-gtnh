@@ -1,4 +1,4 @@
-# AgentCraft protocol extension: `ops.*` (AI-ops feeds)
+# AgentCraft protocol extension: `ops.*` (AI operations feeds)
 
 Status: extension to [protocol v1](protocol.md), implemented by `hermes-adapter` (card 5a). The
 in-game panels that show it are card 5b; this document is the contract between the two.

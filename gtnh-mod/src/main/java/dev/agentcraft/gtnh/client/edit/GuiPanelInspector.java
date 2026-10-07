@@ -99,6 +99,9 @@ public class GuiPanelInspector extends EditGui {
             Collections.sort(as, (a, b) -> a.name.compareToIgnoreCase(b.name));
             for (AgentInfo a : as) out.add(new Object[] { a.id, a.name.isEmpty() ? a.id : a.name, a.color });
         }
+        // card 5b: any other binding source lists the choices its panel family registered
+        dev.agentcraft.gtnh.edit.PanelTypes.BindingChoices bc = dev.agentcraft.gtnh.edit.PanelTypes.choices(src);
+        if (bc != null) out.addAll(bc.choices());
         if (!PanelType.NONE.equals(src)) out.add(new Object[] { "", "Unbound", 0x9C9488 });
         String q = search.text.trim()
             .toLowerCase(Locale.ROOT);

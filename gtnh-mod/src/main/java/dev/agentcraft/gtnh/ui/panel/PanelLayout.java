@@ -55,7 +55,9 @@ public final class PanelLayout {
         }
     }
 
-    private static final String[][] DEFAULTS = { { "task_wall", "kanban" }, { "goal_atrium", "goal" }, { "monitor", "agent-monitor" } };
+    private static final String[][] DEFAULTS = { { "task_wall", "kanban" }, { "goal_atrium", "goal" }, { "monitor", "agent-monitor" },
+        // card 5b: ops panels
+        { "fleet_board", "ops-fleet" }, { "cron_board", "ops-cron" }, { "usage_panel", "ops-usage" }, { "alert_feed", "ops-alerts" } };
 
     private static File file;
     private static long loadedMtime = Long.MIN_VALUE, lastCheck;

@@ -3,7 +3,8 @@
 # which saves the world), waiting up to GTNH_DEV_STOP_WAIT seconds. Never kill -9s the server.
 set -euo pipefail
 
-SERVER_DIR="${GTNH_DEV_SERVER:-$HOME/gtnh-dev/server}"
+DEV_ROOT="${AGENTCRAFT_DEV_ROOT:-$HOME/agentcraft-dev}"   # dev copy + portable JDK live here
+SERVER_DIR="${GTNH_DEV_SERVER:-$DEV_ROOT/server}"
 WAIT="${GTNH_DEV_STOP_WAIT:-180}"
 cd "$SERVER_DIR"
 

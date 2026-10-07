@@ -36,9 +36,50 @@ public class Config {
     public static double editPerSecond = 4;
     public static int editMaxImportSpan = 48;
     public static String editAuditLog = "agentcraft-edit-audit.log";
+    // card 5b: ops feeds + decision toast
+    public static boolean opsFeeds = true;
+    public static int opsSyncSeconds = 2;
+    public static boolean toastEnabled = true;
+    public static float toastVolume = 0.8F;
+    public static String toastSound = "note.pling";
+    public static float toastPitch = 1.2F;
+    public static int toastSeconds = 9;
+    public static int toastMaxAgeMinutes = 30;
+    public static int toastCooldownMinutes = 10;
+    public static int toastPerMinute = 3;
 
     public static void synchronizeConfiguration(File configFile) {
         Configuration c = new Configuration(configFile);
+        String ops = "ops";
+        opsFeeds = c.getBoolean(
+            "opsFeeds",
+            ops,
+            opsFeeds,
+            "Server: ask the adapter for the ops.* feeds (fleet health, jobs, provider usage, alerts) for the ops panels. Read-only.");
+        opsSyncSeconds = c.getInt("opsSyncSeconds", ops, opsSyncSeconds, 1, 30, "Server: ops panel data is sent to clients at most this often, and only when it changed.");
+        String toast = "toast";
+        toastEnabled = c.getBoolean(
+            "enabled",
+            toast,
+            toastEnabled,
+            "Client: a HUD toast + sound when a NEW decision or approval needs you (alerts and ops events never toast). /agentcraft toast mute|unmute also works.");
+        toastVolume = c.getFloat("volume", toast, toastVolume, 0.0F, 1.0F, "Client: toast sound volume (0 = silent).");
+        toastSound = c.getString(
+            "sound",
+            toast,
+            toastSound,
+            "Client: sound event for the toast. Default is a vanilla sound (no asset needed); any sound event name works, e.g. from a resource pack (\"mypack:ding\").");
+        toastPitch = c.getFloat("pitch", toast, toastPitch, 0.5F, 2.0F, "Client: toast sound pitch.");
+        toastSeconds = c.getInt("seconds", toast, toastSeconds, 3, 60, "Client: how long a toast stays on screen.");
+        toastMaxAgeMinutes = c.getInt(
+            "maxAgeMinutes",
+            toast,
+            toastMaxAgeMinutes,
+            1,
+            1440,
+            "Client: a decision older than this when the client first sees it is not toasted (no replay of old decisions after joining).");
+        toastCooldownMinutes = c.getInt("cooldownMinutes", toast, toastCooldownMinutes, 1, 1440, "Client: a decision that closed and re-opened toasts again only after this long.");
+        toastPerMinute = c.getInt("perMinute", toast, toastPerMinute, 1, 20, "Client: at most this many toasts per minute; the rest are folded into \"+N more\".");
         String cat = "bridge";
         enabled = c.getBoolean("enabled", cat, enabled, "Connect to the Hermes adapter and show agents.");
         adapterUrl = c.getString(

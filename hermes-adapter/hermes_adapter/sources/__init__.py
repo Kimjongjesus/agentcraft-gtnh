@@ -9,9 +9,9 @@ Two kanban sources:
   comments, so agent activity lines are coarser). Kept for environments where the DB is not
   readable directly.
 
-Cron jobs come from ``~/.hermes/cron/jobs.json`` (only name/schedule/state fields are kept; prompts,
+Cron jobs come from ``<hermes home>/cron/jobs.json`` (only name/schedule/state fields are kept; prompts,
 delivery targets and errors are never read into the model). Profiles are the directories under
-``~/.hermes/profiles`` plus ``default``; for "sessions" only the modification time of each
+``<hermes home>/profiles`` plus ``default``; for "sessions" only the modification time of each
 profile's session store is used (never its content).
 """
 

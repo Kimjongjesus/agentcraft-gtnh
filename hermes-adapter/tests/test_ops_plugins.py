@@ -96,13 +96,13 @@ class PluginLoaderTest(unittest.TestCase):
         module = ops._load_module_from_path(p)
 
         class EP:
-            name = "homelab"
+            name = "my_sources"
 
             def load(self):
                 return module
 
         with mock.patch("importlib.metadata.entry_points", return_value=[EP()]) as eps:
-            self.assertEqual(load_plugin("ep:homelab")[0].id, "filesrc")
+            self.assertEqual(load_plugin("ep:my_sources")[0].id, "filesrc")
             eps.assert_called_with(group=ops.ENTRY_POINT_GROUP)
             with self.assertRaises(ValueError):
                 load_plugin("ep:missing")

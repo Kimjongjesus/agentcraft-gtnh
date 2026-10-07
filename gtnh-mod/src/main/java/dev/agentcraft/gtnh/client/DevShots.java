@@ -31,7 +31,7 @@ public final class DevShots {
 
     private static final Pattern SHOT = Pattern.compile("devshot ([A-Za-z0-9_-]{1,40})");
     /** devgui taskwall|library|close [binding|-] [select]: open a card-3 screen for a screenshot. */
-    private static final Pattern GUI = Pattern.compile("devgui (taskwall|library|editor|inspector|close)(?: (\\S+))?(?: (\\S+))?");
+    private static final Pattern GUI = Pattern.compile("devgui (taskwall|library|editor|inspector|decisions|close)(?: (\\S+))?(?: (\\S+))?");
     private volatile String[] pendingGui;
     /** card 6: devact ACTION k=v ... sends an edit-tool request as this player; devhud on|off shows the HUD in shots. */
     private static final Pattern ACT = Pattern.compile("devact (\\S+)((?: [A-Za-z]+=\\S+)*)");
@@ -146,11 +146,16 @@ public final class DevShots {
                 pendingGui = null;
                 if ("close".equals(gui[0])) {
                     mc.displayGuiScreen(null);
+                } else if ("decisions".equals(gui[0])) {
+                    // card 5b: the read-only decision screen
+                    mc.displayGuiScreen(new GuiDecisions(gui[1].isEmpty() ? null : gui[1]));
                 } else if ("editor".equals(gui[0])) {
                     // card 6: devgui editor palette|anchors|layouts [anchor name | action like diff:NAME]
+                    // card 5b: devgui editor palette scroll:end (palette scrolled to the last kinds)
                     int tab = "anchors".equals(gui[1]) ? 1 : "layouts".equals(gui[1]) ? 2 : 0;
                     String arg = gui[2].isEmpty() ? null : gui[2];
-                    mc.displayGuiScreen(new dev.agentcraft.gtnh.client.edit.GuiEditor(tab, tab == 1 ? arg : null, null, tab == 2 ? arg : null));
+                    String action = tab == 2 || (tab == 0 && arg != null && arg.startsWith("scroll")) ? arg : null;
+                    mc.displayGuiScreen(new dev.agentcraft.gtnh.client.edit.GuiEditor(tab, tab == 1 ? arg : null, null, action));
                 } else if ("inspector".equals(gui[0])) {
                     // card 6: devgui inspector x,y,z [binding:w:h]
                     String[] p = gui[1].split(",");

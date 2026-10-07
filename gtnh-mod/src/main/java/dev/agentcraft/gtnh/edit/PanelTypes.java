@@ -14,8 +14,31 @@ import java.util.Map;
 public final class PanelTypes {
 
     private static final Map<String, PanelType> TYPES = new LinkedHashMap<>();
+    private static final Map<String, BindingChoices> CHOICES = new LinkedHashMap<>();
 
     private PanelTypes() {}
+
+    /**
+     * Card 5b: binding choices for a binding source the editor has no built-in list for (the
+     * inspector shows them, plus "Unbound"). A later panel family registers one per source next to
+     * its kinds, so the editor screens stay free of per-kind code.
+     */
+    public interface BindingChoices {
+
+        /** One-line summary for the inspector header, e.g. "binds to an ops filter (or all)". */
+        String hint();
+
+        /** {id, label, rgb colour} rows; the id is what the binding becomes. */
+        List<Object[]> choices();
+    }
+
+    public static synchronized void registerChoices(String source, BindingChoices c) {
+        CHOICES.put(source, c);
+    }
+
+    public static synchronized BindingChoices choices(String source) {
+        return source == null ? null : CHOICES.get(source);
+    }
 
     public static synchronized void register(PanelType t) {
         TYPES.put(t.id, t);

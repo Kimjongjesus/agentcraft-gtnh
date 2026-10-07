@@ -27,7 +27,7 @@ import dev.agentcraft.gtnh.ui.panel.InWorldPanels;
  * <li>monitor: a W x H screen (default 3 x 2, the block is its bottom-centre) on the block's front:
  * name, state, activity, then the agent's last log lines. Drawn only within monitorRenderDistance.</li>
  * <li>status lamp: a glowing shell in the status colour of its agent (or the fleet); breathes while
- * waiting on Eli; dark while the agent is off shift or the adapter is offline.</li>
+ * waiting on the player; dark while the agent is off shift or the adapter is offline.</li>
  * <li>beacon: the fleet colour as a beam into the sky plus a glowing shell.</li>
  * </ul>
  */
@@ -57,6 +57,15 @@ public class RenderAgentCraftTile extends TileEntitySpecialRenderer {
                 case ATRIUM:
                     if (distSq <= sq(Config.wallRenderDistance)) InWorldPanels.render(t, "goal_atrium", x, y, z, dist);
                     return;
+                case FLEETBOARD:
+                case CRONBOARD:
+                case USAGE:
+                case ALERTS: {
+                    // card 5b: ops panels, drawn like the task wall (layout key = the kind's id)
+                    BlockAgentCraft.Kind k = ((BlockAgentCraft) te.getBlockType()).kind;
+                    if (distSq <= sq(Config.wallRenderDistance)) InWorldPanels.render(t, k.opsType(), x, y, z, dist);
+                    return;
+                }
                 case LIBRARY:
                     if (distSq <= 64.0D) renderLabel("Agent Library", "right-click to read", 0xF4EFE6, x + 0.5, y + 1.4, z + 0.5);
                     return;

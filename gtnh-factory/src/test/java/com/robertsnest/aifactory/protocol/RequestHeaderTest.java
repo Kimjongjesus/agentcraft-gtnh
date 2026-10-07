@@ -8,27 +8,27 @@ public class RequestHeaderTest {
 
     @Test
     public void acceptsAWellFormedReadOnlyTelemetryHeader() {
-        RequestHeader header = new RequestHeader("ai-factory/v2", "req-123", "Eli", 42L);
+        RequestHeader header = new RequestHeader("ai-factory/v2", "req-123", "Player1", 42L);
 
         assertEquals("ai-factory/v2", header.protocolVersion());
         assertEquals("req-123", header.requestId());
-        assertEquals("Eli", header.actor());
+        assertEquals("Player1", header.actor());
         assertEquals(42L, header.worldRevision());
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsAnUnsupportedProtocolVersion() {
-        new RequestHeader("ai-factory/v1", "req-123", "Eli", 42L);
+        new RequestHeader("ai-factory/v1", "req-123", "Player1", 42L);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsABlankRequestId() {
-        new RequestHeader("ai-factory/v2", " ", "Eli", 42L);
+        new RequestHeader("ai-factory/v2", " ", "Player1", 42L);
     }
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsANullRequestId() {
-        new RequestHeader("ai-factory/v2", null, "Eli", 42L);
+        new RequestHeader("ai-factory/v2", null, "Player1", 42L);
     }
 
     @Test(expected = IllegalArgumentException.class)
@@ -43,6 +43,6 @@ public class RequestHeaderTest {
 
     @Test(expected = IllegalArgumentException.class)
     public void rejectsANegativeWorldRevision() {
-        new RequestHeader("ai-factory/v2", "req-123", "Eli", -1L);
+        new RequestHeader("ai-factory/v2", "req-123", "Player1", -1L);
     }
 }

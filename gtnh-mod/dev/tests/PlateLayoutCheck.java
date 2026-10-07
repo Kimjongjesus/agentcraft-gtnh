@@ -13,7 +13,7 @@ import dev.agentcraft.gtnh.ui.PlateDeclutter;
 import dev.agentcraft.gtnh.ui.PlateDeclutter.Plate;
 
 /**
- * Card 4: 12 agents all waiting on Eli in the QA nook (two "user" slots, desks on the first ring,
+ * Card 4: 12 agents all waiting on the player in the QA nook (two "user" slots, desks on the first ring,
  * walls behind and beside). The server fans them out over distinct cells (StationAssigner), and the
  * client lays their nameplates out in screen space (PlateDeclutter): from the far and the close QA
  * cameras and from four other angles, no two plates (including the "!" badge) overlap on screen.

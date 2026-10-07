@@ -18,7 +18,7 @@ import java.util.Set;
  * <p>
  * Naming contract (the same idea as upstream's AnchorNames): {@code <station>} is slot 1 of a shared
  * station, {@code <station>_2} .. {@code <station>_N} more slots, {@code <station>_<agentId>} a
- * personal spot (e.g. {@code desk_claude-builder}). Off-shift agents go to the lounge.
+ * personal spot (e.g. {@code desk_builder-a}). Off-shift agents go to the lounge.
  *
  * <p>
  * Per agent, first match wins: personal spot; the slot it already had at that station (sticky);
@@ -201,7 +201,7 @@ public final class StationAssigner {
         newlyMissing.clear();
         // With no station anchors at all every station is "missing"; the caller logs that case once
         // itself. Do not mark stations as warned then, or the per-station warning would be used up
-        // before Eli sets his first anchor.
+        // before the player sets the first anchor.
         boolean anyStanding = false;
         for (String n : anchors.keySet()) {
             if (isStandingAnchor(n)) {

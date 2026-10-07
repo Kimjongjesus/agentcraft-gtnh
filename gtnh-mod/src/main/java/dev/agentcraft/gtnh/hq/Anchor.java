@@ -3,7 +3,7 @@ package dev.agentcraft.gtnh.hq;
 import java.util.Locale;
 
 /**
- * A named spot in Eli's HQ. Stations and agent spots: FEET position + facing yaw. Block anchors
+ * A named spot in the player's HQ. Stations and agent spots: FEET position + facing yaw. Block anchors
  * (overflow_sign): the block position. cam_*: eye position + yaw/pitch (QA cameras, teleport targets).
  * Yaw: 0 = south (+Z), 90 = west (-X), 180 = north (-Z), -90 = east (+X), as in Minecraft.
  */

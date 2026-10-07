@@ -16,19 +16,12 @@ from .sources import BoardData, HermesData
 
 ADAPTER_VERSION = "hermes-adapter 0.1.0"
 
-# profile name -> (display name, role, title). Unknown profiles get a title-cased name.
+# profile name -> (display name, role, title). Unknown profiles get a title-cased name
+# ("builder-a" -> "Builder A"). Only Hermes' own built-in names are listed here; an installation's
+# real names, roles and colours live in a private cast file (``--cast`` or
+# ``<hermes home>/agentcraft-cast.json``, see README), never in this public repo.
 CAST: dict[str, tuple[str, str, str]] = {
-    "default": ("Goon Goblin", "lead", "Front door / orchestrator"),
-    "claude-builder": ("Opus Builder", "worker", "Builder (Opus)"),
-    "claude-builder-sonnet": ("Sonnet Builder", "worker", "Builder (Sonnet)"),
-    "claude-builder-mega": ("Mega Builder", "worker", "Builder (large tasks)"),
-    "sol-reviewer": ("Sol Reviewer", "worker", "Code reviewer"),
-    "sol-reviewer-highrisk": ("Sol HR Reviewer", "worker", "High-risk reviewer"),
-    "luna-reviewer": ("Luna Reviewer", "worker", "Reviewer"),
-    "astra-ultimate": ("Astra", "worker", "Generalist"),
-    "gtnh-oracle-bridge": ("GTNH Oracle", "worker", "GTNH knowledge bridge"),
-    "qwen-uncensored": ("Qwen", "worker", "Local model"),
-    "venues-research-agent": ("Venue Scout", "worker", "Research"),
+    "default": ("Lead", "lead", "Front door / orchestrator"),
     "cron": ("Scheduler", "worker", "Hermes cron jobs"),
 }
 
@@ -39,18 +32,24 @@ PALETTE = [
 # hand-picked colours for the known cast (readable on a dark nameplate); others use PALETTE
 CAST_COLORS: dict[str, str] = {
     "default": "#3FA34D",
-    "claude-builder": "#D97757",
-    "claude-builder-sonnet": "#E8A33D",
-    "claude-builder-mega": "#C6452E",
-    "sol-reviewer": "#2E78C6",
-    "sol-reviewer-highrisk": "#5B8DEF",
-    "luna-reviewer": "#9B6FD6",
-    "astra-ultimate": "#1ABC9C",
-    "gtnh-oracle-bridge": "#C9A227",
-    "qwen-uncensored": "#95A5A6",
-    "venues-research-agent": "#E67E22",
     "cron": "#9C9488",
 }
+CAST_FILE_NAME = "agentcraft-cast.json"
+
+
+def load_cast(path: Any) -> dict[str, dict[str, str]]:
+    """Read a private cast file ``{profile: {name, role, title, color}}``; bad entries are dropped."""
+    import json
+    from pathlib import Path
+
+    raw = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError(f"{path}: cast file must be a JSON object")
+    out: dict[str, dict[str, str]] = {}
+    for prof, entry in raw.items():
+        if isinstance(prof, str) and isinstance(entry, dict):
+            out[prof] = {k: v for k, v in entry.items() if k in ("name", "role", "title", "color") and isinstance(v, str)}
+    return out
 ACCENT = "#F4EFE6"
 
 TASK_STATUS = {
@@ -378,7 +377,7 @@ class Mapper:
             "version": ADAPTER_VERSION,
             "backend": "claude",
             "auth": "ok",
-            "message": clean(f"Hermes ai-ops (read-only): {len(data.boards)} board(s), {len(profiles)} profiles", 120),
+            "message": clean(f"Hermes (read-only): {len(data.boards)} board(s), {len(profiles)} profiles", 120),
             "adapter": "hermes",
             "readOnly": True,
         }
@@ -453,7 +452,7 @@ class Mapper:
         other places, now at a longer length (MAPPING.md "Library"):
 
         * plan / handoff / review-verdict comments written by agent profiles (logs carry the same
-          comments today); comments by anyone else (Eli, the intake) are left out;
+          comments today); comments by anyone else (the owner, or a front-door agent relaying for them) are left out;
         * the result summaries of the newest done cards (Task.summary today);
         * one overview per board (card titles per column, Task.title today);
         * the question of every open decision (Decision.question today).
@@ -520,7 +519,7 @@ class Mapper:
         for g in goals:
             mine = [t for t in tasks if t["board"] == g["board"]]
             lines = [f"{g['text']}: {g['counts']['done']} of {g['total']} cards done, "
-                     f"{g['openDecisions']} decision(s) waiting on Eli."]
+                     f"{g['openDecisions']} decision(s) waiting on you."]
             for col in ("doing", "review", "blocked", "todo"):
                 col_tasks = sorted((t for t in mine if t["status"] == col), key=lambda t: (-t["priority"], -t["updatedAt"]))
                 if not col_tasks:
@@ -549,7 +548,7 @@ class Mapper:
             entries.append({
                 "id": f"{d['agentId']}/decision-{clean_id(d['id'])}",
                 "scope": d["agentId"],
-                "title": clean(f"Waiting on Eli: {d.get('context') or d['id']}", 100),
+                "title": clean(f"Waiting on you: {d.get('context') or d['id']}", 100),
                 "body": clean(body, LIBRARY_BODY, keep_newlines=True),
                 "updated": d["createdAt"],
                 "author": d["agentId"],
@@ -622,7 +621,7 @@ class Mapper:
                 agent["state"] = "thinking"
             return agent
 
-        # waiting on Eli: a needs_input block on a task this profile owns
+        # waiting on the player: a needs_input block on a task this profile owns
         waiting = [
             key for key, t in tasks_by_key.items()
             if t.get("status") == "blocked" and t.get("assignee") == profile and t.get("block_kind") in (None, "needs_input")
@@ -630,7 +629,7 @@ class Mapper:
         if waiting:
             key = max(waiting, key=lambda k: (latest_block.get(k) or {}).get("created_at") or 0)
             t = tasks_by_key[key]
-            # waiting on Eli is never "off shift": the agent stands at the user station with a "!"
+            # waiting on the player is never "off shift": the agent stands at the user station with a "!"
             agent.update(state="waiting_user", station="user", taskId=tid(key), active=True)
             reason = ((latest_block.get(key) or {}).get("payload") or {}).get("reason") or ""
             label = _DECISION.match(reason)

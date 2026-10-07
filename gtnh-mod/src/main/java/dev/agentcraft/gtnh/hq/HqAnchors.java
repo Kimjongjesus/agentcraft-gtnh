@@ -21,7 +21,7 @@ import com.google.gson.JsonParser;
 import dev.agentcraft.gtnh.AgentCraftGTNH;
 
 /**
- * hq-anchors.json: Station -> coordinates + facing, maintained by Eli (by hand, or in-game with
+ * hq-anchors.json: Station -> coordinates + facing, maintained by the player (by hand, or in-game with
  * /agentcraft anchor set). The mod never places blocks; it only reads these spots.
  *
  * <pre>
@@ -30,7 +30,7 @@ import dev.agentcraft.gtnh.AgentCraftGTNH;
  *   "dimension": 0,
  *   "anchors": {
  *     "lounge":              {"x": 100.5, "y": 64, "z": 200.5, "facing": "south"},
- *     "desk_claude-builder": {"x": 104.5, "y": 64, "z": 196.5, "facing": "north"},
+ *     "desk_builder-a": {"x": 104.5, "y": 64, "z": 196.5, "facing": "north"},
  *     "overflow_sign":       {"x": 99, "y": 65, "z": 201}
  *   }
  * }

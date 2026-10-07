@@ -31,13 +31,13 @@ public class BaseScopeAndCoverageTest {
     public void identityChangesWithDimensionKindAndBox() {
         BaseScope a = new BaseScope(BaseScope.Kind.CONFIGURED, "b", 0, "Overworld", 0, 64, 0, 10, 5, null);
         BaseScope b = new BaseScope(BaseScope.Kind.CONFIGURED, "b", 1, "End", 0, 64, 0, 10, 5, null);
-        BaseScope c = new BaseScope(BaseScope.Kind.PLAYER_RELATIVE, "b", 0, "Overworld", 0, 64, 0, 10, 5, "Eli");
+        BaseScope c = new BaseScope(BaseScope.Kind.PLAYER_RELATIVE, "b", 0, "Overworld", 0, 64, 0, 10, 5, "Player1");
         BaseScope d = new BaseScope(BaseScope.Kind.CONFIGURED, "b", 0, "Overworld", 0, 64, 0, 11, 5, null);
         assertNotEquals(a.identity(), b.identity());
         assertNotEquals(a.identity(), c.identity());
         assertNotEquals(a.identity(), d.identity());
         assertEquals("configured:dim0:0,64,0:r10h5", a.identity());
-        assertEquals("Eli", c.anchor());
+        assertEquals("Player1", c.anchor());
     }
 
     @Test

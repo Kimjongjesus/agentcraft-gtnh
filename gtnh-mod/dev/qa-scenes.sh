@@ -44,7 +44,7 @@ sleep 3
 $Q cmd "say devshot 09-monitor-updated-3s"
 sleep 5
 
-mark "C: Opus Builder blocks with DEMO READY -> walks to the user station"
+mark "C: Builder A blocks with DEMO READY -> walks to the user station"
 $Q cmd "agentcraft anchor tp cam_overview Developer"
 sleep 3
 phase demo-ready

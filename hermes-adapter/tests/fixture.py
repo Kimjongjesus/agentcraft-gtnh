@@ -47,7 +47,7 @@ class BoardFixture:
         self.sql(
             "INSERT INTO tasks (id, title, body, assignee, status, priority, created_by, created_at, branch_name, block_kind, result) "
             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-            (tid, title, body, assignee, status, kw.get("priority", 0), kw.get("created_by", "eli"), kw.get("created_at", self.now - 3600),
+            (tid, title, body, assignee, status, kw.get("priority", 0), kw.get("created_by", "owner"), kw.get("created_at", self.now - 3600),
              kw.get("branch"), kw.get("block_kind"), kw.get("result")),
         )
 
@@ -72,19 +72,19 @@ class BoardFixture:
 
 
 class Fixture(BoardFixture):
-    """A throwaway Hermes home; the helpers inherited from BoardFixture write to board 'homelab'."""
+    """A throwaway Hermes home; the helpers inherited from BoardFixture write to board 'main'."""
 
     def __init__(self, root: Path, now: int) -> None:
         self.root = root
-        self.home = root / ".hermes"
+        self.home = root / "hermes-home"
         self.boards_dir = self.home / "kanban" / "boards"
-        self.board = self.boards_dir / "homelab"
+        self.board = self.boards_dir / "main"
         super().__init__(self.board / "kanban.db", now)
-        for p in ("claude-builder", "sol-reviewer", "claude-builder-sonnet", "astra-ultimate", ".deleted"):
+        for p in ("builder-a", "reviewer-a", "builder-b", "helper-a", ".deleted"):
             (self.home / "profiles" / p).mkdir(parents=True)
         (self.home / "cron").mkdir(parents=True)
         (self.home / "cron" / "jobs.json").write_text(json.dumps({"jobs": [
-            {"id": "a1", "name": "nest.ops.daily", "enabled": True, "state": "scheduled", "last_status": "ok",
+            {"id": "a1", "name": "ops.daily-report", "enabled": True, "state": "scheduled", "last_status": "ok",
              "last_run_at": "2026-10-05T01:00:00-04:00", "next_run_at": "2099-01-01T06:30:00-04:00",
              "failure_streak": 0, "prompt": "SECRET PROMPT " + FAKE_TOKEN, "deliver": "discord:123456789012345678",
              "schedule": {"kind": "cron", "expr": "30 6 * * *", "display": "30 6 * * *"}},
@@ -100,17 +100,17 @@ class Fixture(BoardFixture):
 def standard(root: Path, now: int) -> Fixture:
     """A board with one live builder, one waiting reviewer task, a dependency and planted secrets."""
     f = Fixture(root, now)
-    f.task("t_build", "Build the thing", "running", "claude-builder",
-           body=f"Use token {FAKE_TOKEN} and read /home/aiops/.hermes/auth.json", priority=80, branch="p1-gtnh-viewer")
-    rid = f.run("t_build", "claude-builder")
+    f.task("t_build", "Build the thing", "running", "builder-a",
+           body=f"Use token {FAKE_TOKEN} and read /home/user/.config/tool/auth.json", priority=80, branch="p1-gtnh-viewer")
+    rid = f.run("t_build", "builder-a")
     f.event("t_build", "claimed", {"lock": "x", "run_id": rid}, run_id=rid, at=now - 590)
-    f.comment("t_build", "claude-builder", "PROGRESS: wiring the websocket bridge", at=now - 20)
-    f.comment("t_build", "claude-builder", f"debug: password={FAKE_GH} at https://user:hunter2@example.com/x", at=now - 25)
-    f.task("t_parent", "Parent card", "done", "claude-builder-sonnet", created_at=now - 7200)
+    f.comment("t_build", "builder-a", "PROGRESS: wiring the websocket bridge", at=now - 20)
+    f.comment("t_build", "builder-a", f"debug: password={FAKE_GH} at https://user:hunter2@example.com/x", at=now - 25)
+    f.task("t_parent", "Parent card", "done", "builder-b", created_at=now - 7200)
     f.link("t_parent", "t_build")
-    f.task("t_wait", "Review the plan", "blocked", "sol-reviewer", block_kind="needs_input")
+    f.task("t_wait", "Review the plan", "blocked", "reviewer-a", block_kind="needs_input")
     f.event("t_wait", "blocked", {"reason": "QUESTION q1: ship it now? || CHOICES: Yes | No | Later", "kind": "needs_input"}, at=now - 120)
-    f.task("t_personal", "Summarise notes", "todo", "astra-ultimate",
-           body="Read ~/.claude/projects/-home-aiops/memory/personal-schedule.md and quote it")
-    f.comment("t_personal", "astra-ultimate", "From personal-health.md: private details here")
+    f.task("t_personal", "Summarise notes", "todo", "helper-a",
+           body="Read ~/.claude/projects/-home-user/memory/personal-schedule.md and quote it")
+    f.comment("t_personal", "helper-a", "From personal-health.md: private details here")
     return f

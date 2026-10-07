@@ -109,21 +109,21 @@ class SnapshotPrivacyTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_multiline_comment_canary(self):
-        self.f.comment("t_build", "claude-builder", f"PROGRESS: {PRIVATE_CANARY}\n{HINT}", at=self.now - 5)
+        self.f.comment("t_build", "builder-a", f"PROGRESS: {PRIVATE_CANARY}\n{HINT}", at=self.now - 5)
         model = build(self.f.home)
         self.assertNotIn("CANARY", json.dumps(model))
-        a = {a["id"]: a for a in model["agents"]}["claude-builder"]
+        a = {a["id"]: a for a in model["agents"]}["builder-a"]
         self.assertEqual(a["activity"], WITHHELD)
 
     def test_multiline_heartbeat_canary(self):
-        # run 1 is t_build's live claude-builder run in the standard fixture
+        # run 1 is t_build's live builder-a run in the standard fixture
         self.f.event("t_build", "heartbeat", {"note": f"{PRIVATE_CANARY}\n{HINT}"}, run_id=1, at=self.now - 1)
         model = build(self.f.home)
         self.assertNotIn("CANARY", json.dumps(model))
-        self.assertEqual({a["id"]: a for a in model["agents"]}["claude-builder"]["activity"], WITHHELD)
+        self.assertEqual({a["id"]: a for a in model["agents"]}["builder-a"]["activity"], WITHHELD)
 
     def test_decision_canary(self):
-        self.f.task("t_q", "Ask Eli", "blocked", "claude-builder-sonnet", block_kind="needs_input")
+        self.f.task("t_q", "Ask the owner", "blocked", "builder-b", block_kind="needs_input")
         self.f.event("t_q", "blocked", {"kind": "needs_input",
                                         "reason": f"QUESTION q1: {PRIVATE_CANARY}? || CHOICES: a | b ({HINT})"})
         model = build(self.f.home)
@@ -133,11 +133,11 @@ class SnapshotPrivacyTest(unittest.TestCase):
 
     def test_flag_secrets_in_every_field(self):
         sec = f"deploy --password {SECRET_CANARY} --api-key '{SECRET_CANARY} b' -H \"Authorization: token {SECRET_CANARY}\""
-        self.f.task("t_sec", f"Title {sec}", "blocked", "claude-builder-sonnet", body=sec, block_kind="needs_input",
+        self.f.task("t_sec", f"Title {sec}", "blocked", "builder-b", body=sec, block_kind="needs_input",
                     result=sec, branch=f"b --token {SECRET_CANARY}")
         self.f.event("t_sec", "blocked", {"kind": "needs_input", "reason": f"PERMISSION p1: {sec} || CHOICES: Approve | Deny"})
-        self.f.run("t_sec", "claude-builder-sonnet", status="done", ended=self.now - 5, outcome="completed", summary=sec)
-        self.f.comment("t_sec", "claude-builder-sonnet", f"PROGRESS: {sec}")
+        self.f.run("t_sec", "builder-b", status="done", ended=self.now - 5, outcome="completed", summary=sec)
+        self.f.comment("t_sec", "builder-b", f"PROGRESS: {sec}")
         self.f.event("t_sec", "completed", {"summary": sec})
         model = build(self.f.home)
         blob = json.dumps(model)
@@ -157,7 +157,7 @@ class TwoBoardTest(unittest.TestCase):
         f = self.f = Fixture(Path(self.tmp.name), now)
         ops = self.ops = f.add_board("ops")
         ids = []
-        for board, prof, word in ((f, "claude-builder", "alpha"), (ops, "sol-reviewer", "beta")):
+        for board, prof, word in ((f, "builder-a", "alpha"), (ops, "reviewer-a", "beta")):
             board.task(f"t_{word}", f"{word} card", "blocked", prof, block_kind="needs_input")
             board.task("t_same", f"same id on {word}", "todo", prof)
             board.task(f"t_{word}_live", f"{word} live card", "running", prof)
@@ -181,8 +181,8 @@ class TwoBoardTest(unittest.TestCase):
         self.assertEqual(len(ds), 2)
         self.assertEqual(len({d["id"] for d in ds}), 2)
         by_task = {d["taskId"]: d for d in ds}
-        self.assertEqual(by_task["t_alpha"]["agentId"], "claude-builder")
-        self.assertEqual(by_task["t_beta"]["agentId"], "sol-reviewer")
+        self.assertEqual(by_task["t_alpha"]["agentId"], "builder-a")
+        self.assertEqual(by_task["t_beta"]["agentId"], "reviewer-a")
         self.assertIn("alpha question", by_task["t_alpha"]["question"])
         self.assertIn("beta question", by_task["t_beta"]["question"])
         self.assertEqual(by_task["t_alpha"]["options"], ["alpha-yes", "alpha-no"])
@@ -190,33 +190,33 @@ class TwoBoardTest(unittest.TestCase):
 
     def test_agent_activity_stays_on_its_board(self):
         agents = {a["id"]: a for a in self.model["agents"]}
-        self.assertEqual(agents["claude-builder"]["taskId"], "t_alpha_live")
-        self.assertEqual(agents["sol-reviewer"]["taskId"], "t_beta_live")
-        self.assertEqual(agents["claude-builder"]["activity"], "alpha heartbeat note")
-        self.assertEqual(agents["sol-reviewer"]["activity"], "beta heartbeat note")
+        self.assertEqual(agents["builder-a"]["taskId"], "t_alpha_live")
+        self.assertEqual(agents["reviewer-a"]["taskId"], "t_beta_live")
+        self.assertEqual(agents["builder-a"]["activity"], "alpha heartbeat note")
+        self.assertEqual(agents["reviewer-a"]["activity"], "beta heartbeat note")
 
     def test_logs_and_feed_attribution(self):
         logs = {l["agentId"]: " ".join(e["text"] for e in l["entries"]) for l in self.model["logs"]}
-        self.assertIn("alpha", logs["claude-builder"])
-        self.assertNotIn("beta", logs["claude-builder"])
-        self.assertIn("beta", logs["sol-reviewer"])
-        self.assertNotIn("alpha", logs["sol-reviewer"])
+        self.assertIn("alpha", logs["builder-a"])
+        self.assertNotIn("beta", logs["builder-a"])
+        self.assertIn("beta", logs["reviewer-a"])
+        self.assertNotIn("alpha", logs["reviewer-a"])
         for item in self.model["feed"]:
             if "alpha" in item["text"]:
-                self.assertEqual(item.get("agentId"), "claude-builder", item)
+                self.assertEqual(item.get("agentId"), "builder-a", item)
             if "beta" in item["text"]:
-                self.assertEqual(item.get("agentId"), "sol-reviewer", item)
+                self.assertEqual(item.get("agentId"), "reviewer-a", item)
 
     def test_same_card_id_on_two_boards(self):
         tasks = {t["id"]: t for t in self.model["tasks"]}
         self.assertNotIn("t_same", tasks)
-        self.assertEqual(tasks["homelab:t_same"]["board"], "homelab")
+        self.assertEqual(tasks["main:t_same"]["board"], "main")
         self.assertEqual(tasks["ops:t_same"]["board"], "ops")
-        self.assertEqual(tasks["homelab:t_same"]["assignee"], "claude-builder")
-        self.assertEqual(tasks["ops:t_same"]["assignee"], "sol-reviewer")
+        self.assertEqual(tasks["main:t_same"]["assignee"], "builder-a")
+        self.assertEqual(tasks["ops:t_same"]["assignee"], "reviewer-a")
         self.assertEqual(len(tasks), len(self.model["tasks"]), "task ids are unique")
         # unique ids are left alone
-        self.assertEqual(tasks["t_alpha"]["board"], "homelab")
+        self.assertEqual(tasks["t_alpha"]["board"], "main")
 
 
 if __name__ == "__main__":

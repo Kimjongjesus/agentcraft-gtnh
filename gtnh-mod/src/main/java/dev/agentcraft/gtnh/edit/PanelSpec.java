@@ -160,7 +160,7 @@ public final class PanelSpec {
         return b.toString();
     }
 
-    /** What changed from {@code o} to this, e.g. "binding all -> homelab, size 5x3 -> 4x3". */
+    /** What changed from {@code o} to this, e.g. "binding all -> main, size 5x3 -> 4x3". */
     public String changesFrom(PanelSpec o) {
         StringBuilder b = new StringBuilder();
         if (!type.equals(o.type)) add(b, "type " + o.type + " -> " + type);

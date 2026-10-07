@@ -78,6 +78,10 @@ public class GuiEditor extends EditGui {
                 case "undo":
                     ClientEdit.send("a", "undo");
                     break;
+                case "scroll":
+                    // dev/QA screenshots: start the palette scrolled to the end (the newest kinds)
+                    left.offset = Float.MAX_VALUE;
+                    break;
                 default:
             }
         }

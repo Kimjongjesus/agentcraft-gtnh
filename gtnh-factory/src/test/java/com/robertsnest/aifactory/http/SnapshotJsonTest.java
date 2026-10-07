@@ -123,7 +123,7 @@ public class SnapshotJsonTest {
             Boolean.FALSE,
             Boolean.FALSE,
             "Plains",
-            Arrays.asList("Eli"),
+            Arrays.asList("Player1"),
             1,
             entities,
             Integer.valueOf(2),
@@ -349,7 +349,7 @@ public class SnapshotJsonTest {
             TestJsonParser.obj(surroundings.get("entityCounts"))
                 .get("EntityZombie"));
         assertEquals(
-            "Eli",
+            "Player1",
             TestJsonParser.arr(surroundings.get("playersInScope"))
                 .get(0));
         assertEquals(

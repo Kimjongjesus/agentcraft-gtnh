@@ -8,7 +8,7 @@ setblock -72 4 -217 agentcraftgtnh:goal_atrium 5
 setblock -72 4 -212 agentcraftgtnh:library 5
 # bindings: board slug or "all" (console form takes coordinates, then the screen size)
 agentcraft bind all -72 4 -226 5 3
-agentcraft bind homelab -72 4 -221 3 3
+agentcraft bind main -72 4 -221 3 3
 agentcraft bind all -72 4 -217 3 3
 agentcraft bind all -72 4 -212
 # QA cameras: feet position, yaw (90 = looking west), pitch

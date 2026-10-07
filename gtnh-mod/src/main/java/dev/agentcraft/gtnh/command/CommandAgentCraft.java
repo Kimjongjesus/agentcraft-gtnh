@@ -58,12 +58,12 @@ import dev.agentcraft.gtnh.state.HqData;
  * give &lt;monitor|lamp|beacon&gt; [count]
  * </pre>
  *
- * Nothing here places or breaks blocks: anchors are a JSON file, bindings are a field on Eli's own
+ * Nothing here places or breaks blocks: anchors are a JSON file, bindings are a field on the player's own
  * monitor/lamp blocks, the overflow anchor points at a sign he placed.
  */
 public class CommandAgentCraft extends CommandBase {
 
-    private static final String USAGE = "/agentcraft <status|agents|board|anchor|bind|give|edit|cap|help>";
+    private static final String USAGE = "/agentcraft <status|agents|board|ops|anchor|bind|give|edit|toast|cap|help>";
 
     @Override
     public String getCommandName() {
@@ -118,6 +118,20 @@ public class CommandAgentCraft extends CommandBase {
             case "edit":
                 edit(sender, args);
                 return;
+            case "toast": {
+                // card 5b: the setting lives on the player's client (each player mutes for themself);
+                // the console form names the player: /agentcraft toast <action> <player>
+                String a = args.length > 1 ? args[1].toLowerCase(Locale.ROOT) : "status";
+                if (!a.equals("mute") && !a.equals("unmute") && !a.equals("test") && !a.equals("status") && !a.equals("open")) {
+                    throw new WrongUsageException("/agentcraft toast <mute|unmute|test|status|open> [player]");
+                }
+                EntityPlayerMP target = args.length > 2 ? getPlayer(sender, args[2]) : getCommandSenderAsPlayer(sender);
+                Net.sendTo(new Net.ToastCtl(a), target);
+                return;
+            }
+            case "ops":
+                ops(sender);
+                return;
             case "help":
                 help(sender);
                 return;
@@ -136,6 +150,9 @@ public class CommandAgentCraft extends CommandBase {
         say(s, " bind overflow                    a vanilla sign: +N more agents");
         say(s, " bind ... <x> <y> <z> [w h]       console form; cap <0..64> NPC cap until restart");
         say(s, " Right-click a task wall / atrium (cards + details) or library (notes): read-only screens.");
+        say(s, "\u00a76 Ops panels (card 5b, read-only): give fleetboard|cronboard|usage|alerts [n]");
+        say(s, " bind <all|group|source|provider> [w h]   an ops panel: filter what it shows; ops = feed status");
+        say(s, " toast mute|unmute|test|status|open      decision toast (your client); key N opens decisions");
         say(s, "\u00a76 Office edit tool (card 6): give edittool, then sneak + right-click to edit");
         say(s, " edit status|undo|redo|history|lock [why]|unlock|scan [r]|audit [n]|reload");
         say(s, " edit snapshot save|diff|restore <name> | snapshot list");
@@ -180,6 +197,47 @@ public class CommandAgentCraft extends CommandBase {
     }
 
     // ---- status / agents ------------------------------------------------------------------
+
+    /** Card 5b: what the server holds from the ops feeds, and the open decisions. */
+    private static void ops(ICommandSender sender) {
+        dev.agentcraft.gtnh.server.OpsSync o = CommonProxy.sync.ops;
+        dev.agentcraft.gtnh.ops.OpsModel m = o.model();
+        say(
+            sender,
+            "[AgentCraft] ops feed " + (m.live() ? "LIVE" : "offline")
+                + " worst="
+                + o.opsWorst()
+                + " fleet="
+                + CommonProxy.sync.fleetFamily()
+                + " | services="
+                + m.count("service")
+                + " jobs="
+                + m.count("job")
+                + " usage="
+                + m.count("usage")
+                + " alerts="
+                + m.count("alert")
+                + " sources="
+                + m.count("source")
+                + " | msgs="
+                + m.messages
+                + " ignored="
+                + m.ignored
+                + " evicted="
+                + m.evicted
+                + " | blobs ops="
+                + o.opsBlobs
+                + " ("
+                + o.lastOpsBytes
+                + " B) decisions="
+                + o.decisionBlobs
+                + " ("
+                + o.lastDecisionBytes
+                + " B) openDecisions="
+                + o.openDecisionCount());
+        java.util.List<String> f = o.filters();
+        if (!f.isEmpty()) say(sender, "  filters: " + String.join(", ", f));
+    }
 
     private static void status(ICommandSender sender) {
         AgentWorldSync sync = CommonProxy.sync;
@@ -277,7 +335,7 @@ public class CommandAgentCraft extends CommandBase {
                     + a.station
                     + " -> "
                     + where
-                    + (a.waiting ? " \u00a76! waiting on Eli\u00a7r" : "")
+                    + (a.waiting ? " \u00a76! waiting on you\u00a7r" : "")
                     + " | "
                     + a.stateLine());
         }
@@ -458,7 +516,7 @@ public class CommandAgentCraft extends CommandBase {
     private static String checkName(String s) {
         String n = s.toLowerCase(Locale.ROOT);
         if (!HqAnchors.NAME.matcher(n)
-            .matches()) throw new WrongUsageException("anchor names: a-z 0-9 _ . : - (e.g. desk_claude-builder, lounge_2)");
+            .matches()) throw new WrongUsageException("anchor names: a-z 0-9 _ . : - (e.g. desk_builder-a, lounge_2)");
         return n;
     }
 
@@ -536,8 +594,16 @@ public class CommandAgentCraft extends CommandBase {
         }
         String binding = "clear".equals(what) ? "" : what;
         Block block = world.getBlock(x, y, z);
+        boolean opsBlock = te instanceof TileAgentCraft.OpsScreen;
         boolean boardBlock = te instanceof TileAgentCraft.TaskWall || te instanceof TileAgentCraft.Library;
-        if (boardBlock) {
+        if (opsBlock) {
+            // card 5b: an ops panel: "all" (default) or a filter (service group, ops source, provider)
+            if ("fleet".equals(binding) || binding.isEmpty()) binding = "all";
+            if (!"all".equals(binding) && !CommonProxy.sync.ops.filters()
+                .contains(binding)) {
+                say(sender, "\u00a7e[AgentCraft] note: nothing in the ops data matches '" + binding + "' right now (bound anyway); filters: " + String.join(", ", CommonProxy.sync.ops.filters()));
+            }
+        } else if (boardBlock) {
             // task wall / atrium / library: a board slug, or "all" (= every board, also the default)
             if ("fleet".equals(binding)) binding = "all";
             if (!binding.isEmpty() && !"all".equals(binding) && !CommonProxy.sync.board.boards()
@@ -558,7 +624,7 @@ public class CommandAgentCraft extends CommandBase {
             return;
         }
         if (rec == null) ((TileAgentCraft) te).setBinding(binding, w, h);
-        boolean screen = te instanceof TileAgentCraft.Monitor || te instanceof TileAgentCraft.TaskWall;
+        boolean screen = te instanceof TileAgentCraft.Monitor || te instanceof TileAgentCraft.TaskWall || opsBlock;
         say(
             sender,
             "[AgentCraft] " + block.getLocalizedName()
@@ -569,7 +635,8 @@ public class CommandAgentCraft extends CommandBase {
                 + " "
                 + z
                 + " now shows "
-                + (binding.isEmpty() ? (boardBlock ? "all boards" : "nothing (unbound)") : "all".equals(binding) ? "all boards" : binding)
+                + (opsBlock ? ("all".equals(binding) ? "every ops source" : "the ops filter " + binding)
+                    : binding.isEmpty() ? (boardBlock ? "all boards" : "nothing (unbound)") : "all".equals(binding) ? "all boards" : binding)
                 + (screen ? " (" + ((TileAgentCraft) te).screenW + "x" + ((TileAgentCraft) te).screenH + " screen)" : ""));
     }
 
@@ -614,6 +681,22 @@ public class CommandAgentCraft extends CommandBase {
                 break;
             case "atrium":
                 b = CommonProxy.atrium;
+                break;
+            case "fleetboard":
+            case "fleet_board":
+                b = CommonProxy.fleetBoard;
+                break;
+            case "cronboard":
+            case "cron_board":
+                b = CommonProxy.cronBoard;
+                break;
+            case "usage":
+            case "usage_panel":
+                b = CommonProxy.usagePanel;
+                break;
+            case "alerts":
+            case "alert_feed":
+                b = CommonProxy.alertFeed;
                 break;
             case "edittool":
             case "tool": {

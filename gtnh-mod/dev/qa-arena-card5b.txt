@@ -1,0 +1,26 @@
+# Card-5b ops wall for the throwaway QA arena (RFG FLAT world, DEV/QA servers ONLY; never the real
+# world). Four ops panels, an atrium and a fleet beacon in a row north of the FLAT spawn, fronts
+# facing south (metadata 3), so cameras south of the row look north at them. Data: the adapter's
+# generic --ops-mock source only.
+setblock -66 4 -252 agentcraftgtnh:fleet_board 3
+setblock -60 4 -252 agentcraftgtnh:cron_board 3
+setblock -55 4 -252 agentcraftgtnh:usage_panel 3
+setblock -50 4 -252 agentcraftgtnh:alert_feed 3
+setblock -45 4 -252 agentcraftgtnh:goal_atrium 3
+setblock -42 4 -252 agentcraftgtnh:fleet_beacon
+setblock -42 4 -250 agentcraftgtnh:status_lamp
+# bindings: "all" (default) or a filter; sizes w h
+agentcraft bind all -66 4 -252 5 3
+agentcraft bind all -60 4 -252 5 3
+agentcraft bind all -55 4 -252 4 2
+agentcraft bind all -50 4 -252 4 3
+agentcraft bind all -45 4 -252 3 3
+agentcraft bind fleet -42 4 -250
+# cameras (x y z yaw pitch): far, mid and one close-up per panel
+agentcraft anchor set cam_ops_far -55 5 -222 180 4
+agentcraft anchor set cam_ops_mid -55 5 -237 180 8
+agentcraft anchor set cam_ops_fleet -65.5 4 -247.2 180 12
+agentcraft anchor set cam_ops_cron -59.5 4 -247.2 180 12
+agentcraft anchor set cam_ops_usage -54.5 4 -248.6 180 4
+agentcraft anchor set cam_ops_alerts -49.5 4 -247.2 180 12
+agentcraft anchor set cam_ops_beacon -43 4 -240 175 -30

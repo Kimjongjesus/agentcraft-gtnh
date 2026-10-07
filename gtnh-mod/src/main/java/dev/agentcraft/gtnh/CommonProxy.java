@@ -8,6 +8,7 @@ import dev.agentcraft.gtnh.edit.PanelTypes;
 import dev.agentcraft.gtnh.entity.EntityHermesAgent;
 import dev.agentcraft.gtnh.item.ItemEditTool;
 import dev.agentcraft.gtnh.net.Net;
+import dev.agentcraft.gtnh.ops.OpsPanels;
 import dev.agentcraft.gtnh.server.AgentWorldSync;
 import dev.agentcraft.gtnh.server.EditService;
 
@@ -24,12 +25,14 @@ public class CommonProxy {
     public static ForemanBridge bridge;
     public static AgentWorldSync sync;
     public static BlockAgentCraft monitor, lamp, beacon, taskWall, library, atrium;
+    /** Card 5b: the four ops panels. */
+    public static BlockAgentCraft fleetBoard, cronBoard, usagePanel, alertFeed;
     public static ItemEditTool editTool;
 
     public void preInit(FMLPreInitializationEvent event) {
         Config.synchronizeConfiguration(event.getSuggestedConfigurationFile());
         AgentCraftGTNH.LOG.info("AgentCraft GTNH {} (adapter {})", Tags.VERSION, Config.adapterUrl);
-        // placeable HQ blocks (Eli puts them where he builds; the mod never places blocks itself)
+        // placeable HQ blocks (the player puts them where they build; the mod never places blocks itself)
         monitor = new BlockAgentCraft(BlockAgentCraft.Kind.MONITOR);
         lamp = new BlockAgentCraft(BlockAgentCraft.Kind.LAMP);
         beacon = new BlockAgentCraft(BlockAgentCraft.Kind.BEACON);
@@ -58,7 +61,29 @@ public class CommonProxy {
         EditService.registerBlock("task_wall", taskWall);
         EditService.registerBlock("library", library);
         EditService.registerBlock("goal_atrium", atrium);
+        // card 5b: ops panels (fleet board, cron board, usage panel, alert feed), registered like the
+        // card 2-4 blocks so the edit tool places, inspects and rebinds them with no editor changes
+        fleetBoard = new BlockAgentCraft(BlockAgentCraft.Kind.FLEETBOARD);
+        cronBoard = new BlockAgentCraft(BlockAgentCraft.Kind.CRONBOARD);
+        usagePanel = new BlockAgentCraft(BlockAgentCraft.Kind.USAGE);
+        alertFeed = new BlockAgentCraft(BlockAgentCraft.Kind.ALERTS);
+        GameRegistry.registerBlock(fleetBoard, OpsPanels.FLEET);
+        GameRegistry.registerBlock(cronBoard, OpsPanels.CRON);
+        GameRegistry.registerBlock(usagePanel, OpsPanels.USAGE);
+        GameRegistry.registerBlock(alertFeed, OpsPanels.ALERTS);
+        GameRegistry.registerTileEntity(TileAgentCraft.OpsFleet.class, AgentCraftGTNH.MODID + "." + OpsPanels.FLEET);
+        GameRegistry.registerTileEntity(TileAgentCraft.OpsCron.class, AgentCraftGTNH.MODID + "." + OpsPanels.CRON);
+        GameRegistry.registerTileEntity(TileAgentCraft.OpsUsage.class, AgentCraftGTNH.MODID + "." + OpsPanels.USAGE);
+        GameRegistry.registerTileEntity(TileAgentCraft.OpsAlerts.class, AgentCraftGTNH.MODID + "." + OpsPanels.ALERTS);
+        OpsPanels.registerTypes();
+        EditService.registerBlock(OpsPanels.FLEET, fleetBoard);
+        EditService.registerBlock(OpsPanels.CRON, cronBoard);
+        EditService.registerBlock(OpsPanels.USAGE, usagePanel);
+        EditService.registerBlock(OpsPanels.ALERTS, alertFeed);
     }
+
+    /** Client only (ClientProxy): /agentcraft toast mute|unmute|test|status for this player's client. */
+    public void toastControl(String action) {}
 
     /** Client only (ClientProxy): edit tool right-click (hit = x, y, z, side of the block, or null for air). */
     public void editToolUse(int[] hit, net.minecraft.entity.player.EntityPlayer player, boolean editMode) {}

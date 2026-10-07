@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Dev/QA run for the HQ (card 2): a plain Forge 1.7.10 dev server from RFG (FLAT world, loopback,
 # port 25571, no GTNH modpack) with this mod, console through a FIFO, optionally a dev client
-# under an existing X display (Xvfb on ai-ops, or any $DISPLAY) that auto-joins and takes a
+# under an existing X display (Xvfb on the agent host, or any $DISPLAY) that auto-joins and takes a
 # screenshot whenever the server says "devshot NAME" (DevShots, -Dagentcraft.dev.shotOnChat).
 #
 # Usage (from gtnh-mod/, with GRADLE_USER_HOME/JAVA_HOME exported):

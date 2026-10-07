@@ -20,20 +20,20 @@ setblock -38 4 -230 bookshelf
 setblock -38 4 -229 bookshelf
 setblock -38 5 -230 bookshelf
 setblock -62 4 -226 agentcraftgtnh:fleet_beacon
-# Eli's overflow sign (a plain vanilla sign; the mod only rewrites its text)
+# The player's overflow sign (a plain vanilla sign; the mod only rewrites its text)
 setblock -60 4 -228 standing_sign 0
 # glass under the elevated overview camera
 setblock -52 9 -213 glass
-# bindings (Eli does these by looking at the block; the console form takes coordinates)
-agentcraft bind claude-builder -56 4 -237
-agentcraft bind claude-builder-sonnet -51 4 -237
-agentcraft bind sol-reviewer -46 4 -237
-agentcraft bind claude-builder -54 4 -237
-agentcraft bind claude-builder-sonnet -49 4 -237
+# bindings (the player does these by looking at the block; the console form takes coordinates)
+agentcraft bind builder-a -56 4 -237
+agentcraft bind builder-b -51 4 -237
+agentcraft bind reviewer-a -46 4 -237
+agentcraft bind builder-a -54 4 -237
+agentcraft bind builder-b -49 4 -237
 agentcraft bind fleet -44 4 -237
 agentcraft bind overflow -60 4 -228
 # station anchors (terminal deliberately left out: missing-anchor fallback first)
-agentcraft anchor set desk_claude-builder -55.5 4 -234.5 north
+agentcraft anchor set desk_builder-a -55.5 4 -234.5 north
 agentcraft anchor set desk -50.5 4 -234.5 north
 agentcraft anchor set desk_2 -45.5 4 -234.5 north
 agentcraft anchor set library -40.5 4 -231.5 east

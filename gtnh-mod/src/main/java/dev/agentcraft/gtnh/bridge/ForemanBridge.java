@@ -70,6 +70,13 @@ public final class ForemanBridge implements Runnable {
                 hello.addProperty("modVersion", modVersion);
                 hello.addProperty("protocol", 1);
                 hello.addProperty("client", "gtnh-mod");
+                if (dev.agentcraft.gtnh.Config.opsFeeds) {
+                    // card 5b: opt in to the read-only ops.* extension (docs/ops-protocol.md); an
+                    // adapter that does not know it ignores the field
+                    com.google.gson.JsonArray features = new com.google.gson.JsonArray();
+                    features.add(new com.google.gson.JsonPrimitive("ops"));
+                    hello.add("features", features);
+                }
                 c.sendText(hello.toString());
                 connected = true;
                 connectedSince = System.currentTimeMillis();

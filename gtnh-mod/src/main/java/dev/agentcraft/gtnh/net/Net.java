@@ -48,6 +48,39 @@ public final class Net {
         CHANNEL.registerMessage(EditCmdHandler.class, EditCmd.class, 4, Side.SERVER);
         CHANNEL.registerMessage(EditViewHandler.class, EditView.class, 5, Side.CLIENT);
         CHANNEL.registerMessage(DisplayHandler.class, Display.class, 6, Side.CLIENT);
+        // card 5b: /agentcraft toast mute|unmute|test|status -> the player's own client
+        CHANNEL.registerMessage(ToastCtlHandler.class, ToastCtl.class, 7, Side.CLIENT);
+    }
+
+    /** Server -> one client: a toast control from /agentcraft toast (the client keeps the setting). */
+    public static final class ToastCtl implements IMessage {
+
+        public String action = "";
+
+        public ToastCtl() {}
+
+        public ToastCtl(String action) {
+            this.action = action;
+        }
+
+        @Override
+        public void fromBytes(ByteBuf buf) {
+            action = clip(ByteBufUtils.readUTF8String(buf), 16);
+        }
+
+        @Override
+        public void toBytes(ByteBuf buf) {
+            ByteBufUtils.writeUTF8String(buf, clip(action, 16));
+        }
+    }
+
+    public static final class ToastCtlHandler implements IMessageHandler<ToastCtl, IMessage> {
+
+        @Override
+        public IMessage onMessage(ToastCtl msg, MessageContext ctx) {
+            dev.agentcraft.gtnh.AgentCraftGTNH.proxy.toastControl(msg.action);
+            return null;
+        }
     }
 
     public static void sendTo(IMessage msg, EntityPlayerMP player) {
@@ -239,7 +272,7 @@ public final class Net {
      */
     public static final class Blob implements IMessage {
 
-        public static final byte BOARD = 1, LIBRARY = 2;
+        public static final byte BOARD = 1, LIBRARY = 2, OPS = 3, DECISIONS = 4;
         public static final int MAX_PARTS = (MAX_BLOB + BLOB_PART - 1) / BLOB_PART;
 
         public byte kind;

@@ -247,7 +247,7 @@ public class EditCheck {
         ok(!Json.write("\u00a7c red").contains("\u00a7"), "section sign escaped in JSON output");
         ok(PanelSpec.cleanLabel("\u00a7cHi\nthere").equals("cHithere"), "labels lose control and section characters");
         ok(PanelSpec.cleanLabel("a very long label that goes past thirty two characters").length() == 32, "labels capped");
-        ok(PanelSpec.cleanBinding("../../etc").isEmpty() && PanelSpec.cleanBinding("claude-builder").equals("claude-builder"), "binding pattern");
+        ok(PanelSpec.cleanBinding("../../etc").isEmpty() && PanelSpec.cleanBinding("builder-a").equals("builder-a"), "binding pattern");
         ok(Pos.parse("1,2,3").equals(new Pos(1, 2, 3)) && Pos.parse("1 2") == null, "pos parse");
     }
 
@@ -269,10 +269,10 @@ public class EditCheck {
         ok(res.ok && r.w.panels.containsKey(new Pos(0, 64, 0)), "place on air: " + res);
         Pos p = new Pos(0, 64, 0);
         PanelSpec cur = r.w.panels.get(p);
-        ok(r.e.edit("Tester", "rebind", one(Op.Change.panel(p, cur.withBinding("homelab")))).ok, "rebind");
+        ok(r.e.edit("Tester", "rebind", one(Op.Change.panel(p, cur.withBinding("main")))).ok, "rebind");
         ok(r.e.edit("Tester", "resize", one(Op.Change.panel(p, r.w.panels.get(p).withSize(4, 2)))).ok, "resize");
         ok(r.e.edit("Tester", "rename", one(Op.Change.panel(p, r.w.panels.get(p).withLabel("Main wall")))).ok, "rename");
-        ok(r.w.panels.get(p).w == 4 && "homelab".equals(r.w.panels.get(p).binding) && "Main wall".equals(r.w.panels.get(p).label), "state after edits");
+        ok(r.w.panels.get(p).w == 4 && "main".equals(r.w.panels.get(p).binding) && "Main wall".equals(r.w.panels.get(p).label), "state after edits");
         ok(r.e.undoStack().size() == 4, "4 undo steps");
         ok(r.e.undo("Tester").ok && "".equals(r.w.panels.get(p).label), "undo rename");
         ok(r.e.undo("Tester").ok && r.w.panels.get(p).w == 5, "undo resize");
@@ -357,14 +357,14 @@ public class EditCheck {
         ok(new File(r.dir, "layouts/before-party.json").isFile(), "snapshot file written");
         // change things
         Pos wall = new Pos(0, 64, 0);
-        r.e.edit("T", "rebind", one(Op.Change.panel(wall, r.w.panels.get(wall).withBinding("homelab"))));
+        r.e.edit("T", "rebind", one(Op.Change.panel(wall, r.w.panels.get(wall).withBinding("main"))));
         r.e.edit("T", "rm atrium", one(Op.Change.panel(new Pos(6, 64, 0), null)));
-        r.place(-6, 64, 0, "monitor", "claude-builder", 2, 2);
+        r.place(-6, 64, 0, "monitor", "builder-a", 2, 2);
         r.e.edit("T", "move lounge", one(Op.Change.anchor("lounge", new Anchor("lounge", 3.5, 64, 4.5, -90, 0))));
         EditEngine.Result d = r.e.diffSnapshot("T", "before-party");
         ok(d.ok && d.plan != null && d.plan.changes.size() == 4, "diff finds 4 differences: " + d.lines);
         String all = String.join("\n", d.lines);
-        ok(all.contains("- remove Desk Monitor") && all.contains("+ place Goal Atrium") && all.contains("binding homelab -> all") && all.contains("anchor lounge moved 3.0 blocks"), "diff text: " + all);
+        ok(all.contains("- remove Desk Monitor") && all.contains("+ place Goal Atrium") && all.contains("binding main -> all") && all.contains("anchor lounge moved 3.0 blocks"), "diff text: " + all);
         ok(r.w.panels.containsKey(new Pos(-6, 64, 0)), "diff is a dry run");
         EditEngine.Result rs = r.e.applyPlan("T", d.plan.token);
         ok(rs.ok && !r.w.panels.containsKey(new Pos(-6, 64, 0)) && r.w.panels.containsKey(new Pos(6, 64, 0)) && "all".equals(r.w.panels.get(wall).binding) && r.a.m.get("lounge").x == 0.5, "restore: " + rs);
@@ -386,21 +386,21 @@ public class EditCheck {
     static void importExport() throws Exception {
         Rig r = new Rig(tmp("io"));
         Pos o = new Pos(100, 64, 100);
-        r.place(100, 64, 95, "task_wall", "homelab", 5, 3);
-        r.place(97, 65, 98, "monitor", "claude-builder", 2, 1);
+        r.place(100, 64, 95, "task_wall", "main", 5, 3);
+        r.place(97, 65, 98, "monitor", "builder-a", 2, 1);
         r.e.edit("T", "label", one(Op.Change.panel(new Pos(97, 65, 98), r.w.panels.get(new Pos(97, 65, 98)).withLabel("Claude's desk"))));
-        r.place(103, 65, 98, "status_lamp", "claude-builder", 1, 1);
-        r.e.edit("T", "a1", one(Op.Change.anchor("desk_claude-builder", new Anchor("desk_claude-builder", 97.5, 64, 99.5, 180, 0))));
+        r.place(103, 65, 98, "status_lamp", "builder-a", 1, 1);
+        r.e.edit("T", "a1", one(Op.Change.anchor("desk_builder-a", new Anchor("desk_builder-a", 97.5, 64, 99.5, 180, 0))));
         r.e.edit("T", "a2", one(Op.Change.anchor("cam_wall", new Anchor("cam_wall", 100.5, 66, 104.5, 180, 10))));
         r.place(500, 64, 500, "monitor", "far-away", 1, 1);
         RelLayout ex = r.e.export("my-office", o, "north", 16, false);
         String text = Json.pretty(ex.toJson());
-        ok(!text.contains("claude") && !text.contains("homelab") && !text.contains("Claude's desk") && !text.contains("far-away"), "export strips ids, boards, labels and far panels: " + text);
+        ok(!text.contains("claude") && !text.contains("main") && !text.contains("Claude's desk") && !text.contains("far-away"), "export strips ids, boards, labels and far panels: " + text);
         ok(text.contains("agent-1") && text.contains("board-1") && text.contains("desk_agent-1"), "export uses placeholders");
         ok(!text.contains("cam_wall") && !text.contains("100.5") && !text.contains("\"x\""), "no cameras, no world coordinates");
         ok(ex.panels.size() == 3 && ex.anchors.size() == 1, "export picks the 3 near panels + 1 anchor");
         RelLayout keep = r.e.export("k", o, "north", 16, true);
-        ok(Json.write(keep.toJson()).contains("claude-builder"), "keepNames keeps them");
+        ok(Json.write(keep.toJson()).contains("builder-a"), "keepNames keeps them");
         // import elsewhere, facing east: rotated, placeholders unbound, personal spot -> shared slot
         RelLayout back = RelLayout.fromJson(Json.parseObject(text));
         Pos o2 = new Pos(0, 70, 0);
@@ -577,7 +577,7 @@ public class EditCheck {
         r.place(0, 64, 0, "monitor", "", 1, 1);
         r.e.saveSnapshot("T", "s1");
         EditEngine.Result dry = r.e.diffSnapshot("T", "s1");
-        ok(r.e.setLock("Eli", true, "panic").ok && r.e.locked(), "lock");
+        ok(r.e.setLock("Player1", true, "panic").ok && r.e.locked(), "lock");
         int calls = r.w.places + r.w.removes + r.w.updates;
         ok(!r.place(1, 64, 0, "monitor", "", 1, 1).ok, "lock: no placement");
         ok(!r.e.undo("T").ok && !r.e.redo("T").ok, "lock: no undo/redo");
@@ -589,15 +589,15 @@ public class EditCheck {
         ok(before.equals(read(r.store.layoutFile())), "lock: hand placements do not write the layout");
         ok(r.w.places + r.w.removes + r.w.updates == calls, "lock: no world calls");
         r.reload();
-        ok(r.e.locked() && r.e.lockInfo().contains("Eli"), "the lock survives a restart");
-        ok(r.e.setLock("Eli", false, "").ok && !r.e.locked() && !r.store.lockFile().exists(), "unlock removes the lock file");
+        ok(r.e.locked() && r.e.lockInfo().contains("Player1"), "the lock survives a restart");
+        ok(r.e.setLock("Player1", false, "").ok && !r.e.locked() && !r.store.lockFile().exists(), "unlock removes the lock file");
         ok(r.place(1, 64, 0, "monitor", "", 1, 1).ok, "edits work again");
         // the lock is honoured even if the lock file cannot be written
         File ro = tmp("lockro");
         Rig r2 = new Rig(ro);
         File lf = r2.store.lockFile();
         lf.mkdirs(); // a directory where the file should be: the write fails
-        EditEngine.Result l = r2.e.setLock("Eli", true, "");
+        EditEngine.Result l = r2.e.setLock("Player1", true, "");
         ok(l.ok && r2.e.locked(), "lock in memory even when the file write fails: " + l);
         ok(!r2.place(0, 64, 0, "monitor", "", 1, 1).ok, "and edits are refused");
     }
@@ -608,7 +608,7 @@ public class EditCheck {
         r.place(0, 64, 0, "task_wall", "all", 5, 3);
         r.e.edit("T", "rm", one(Op.Change.panel(new Pos(0, 64, 0), null)));
         r.place(1, 64, 0, "monitor", "", 1, 1);
-        r.e.setLock("Eli", true, "test");
+        r.e.setLock("Player1", true, "test");
         r.place(2, 64, 0, "monitor", "", 1, 1);
         String log = read(r.audit.file());
         String[] lines = log.split("\n");

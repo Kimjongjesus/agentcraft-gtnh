@@ -42,6 +42,19 @@ public class ClientProxy extends CommonProxy {
         PanelRegistry.register(new KanbanPanel());
         PanelRegistry.register(new GoalPanel());
         PanelRegistry.register(new MonitorPanel());
+        // card 5b: ops panels (source "ops" = this client's ops view; the binding filters it)
+        PanelRegistry.registerSource("ops", b -> dev.agentcraft.gtnh.state.ClientOps.view);
+        PanelRegistry.register(new dev.agentcraft.gtnh.client.panels.OpsPanelRenderers.Fleet());
+        PanelRegistry.register(new dev.agentcraft.gtnh.client.panels.OpsPanelRenderers.Cron());
+        PanelRegistry.register(new dev.agentcraft.gtnh.client.panels.OpsPanelRenderers.Usage());
+        PanelRegistry.register(new dev.agentcraft.gtnh.client.panels.OpsPanelRenderers.Alerts());
+        dev.agentcraft.gtnh.edit.PanelTypes.registerChoices(dev.agentcraft.gtnh.edit.PanelType.OPS, new OpsChoices());
+        dev.agentcraft.gtnh.client.DecisionToast.INSTANCE.init(Loader.instance()
+            .getConfigDir());
+        FMLCommonHandler.instance()
+            .bus()
+            .register(dev.agentcraft.gtnh.client.DecisionToast.INSTANCE);
+        MinecraftForge.EVENT_BUS.register(dev.agentcraft.gtnh.client.DecisionToast.INSTANCE);
         PanelLayout.init(Loader.instance()
             .getConfigDir());
         RenderingRegistry.registerEntityRenderingHandler(EntityHermesAgent.class, new RenderHermesAgent());
@@ -52,6 +65,10 @@ public class ClientProxy extends CommonProxy {
         ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.TaskWall.class, tiles);
         ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.Atrium.class, tiles);
         ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.Library.class, tiles);
+        ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.OpsFleet.class, tiles);
+        ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.OpsCron.class, tiles);
+        ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.OpsUsage.class, tiles);
+        ClientRegistry.bindTileEntitySpecialRenderer(TileAgentCraft.OpsAlerts.class, tiles);
         MinecraftForge.EVENT_BUS.register(new AnchorOverlayRenderer());
         // card 6: edit-mode overlay (anchor markers, panel outline, crosshair card)
         dev.agentcraft.gtnh.client.edit.EditOverlay overlay = new dev.agentcraft.gtnh.client.edit.EditOverlay();
@@ -63,6 +80,36 @@ public class ClientProxy extends CommonProxy {
             .bus()
             .register(new Disconnect());
         DevShots.registerIfRequested();
+    }
+
+    @Override
+    public void toastControl(String action) {
+        // netty thread -> handled on the client thread (next client tick)
+        dev.agentcraft.gtnh.client.DecisionToast.INSTANCE.controls.add(action);
+    }
+
+    /** Card 5b: binding choices the inspector shows for the ops panels (from this client's ops view). */
+    static final class OpsChoices implements dev.agentcraft.gtnh.edit.PanelTypes.BindingChoices {
+
+        @Override
+        public String hint() {
+            return "binds to an ops filter (or all)";
+        }
+
+        @Override
+        public java.util.List<Object[]> choices() {
+            java.util.List<Object[]> out = new java.util.ArrayList<>();
+            out.add(new Object[] { "all", "Every ops source", 0xC9A227 });
+            dev.agentcraft.gtnh.ops.OpsData.View v = dev.agentcraft.gtnh.state.ClientOps.view;
+            java.util.Set<String> groups = new java.util.TreeSet<>(), sources = new java.util.TreeSet<>(), providers = new java.util.TreeSet<>();
+            for (dev.agentcraft.gtnh.ops.OpsData.Service s : v.services) groups.add(s.group);
+            for (dev.agentcraft.gtnh.ops.OpsData.Source s : v.sources) sources.add(s.id);
+            for (dev.agentcraft.gtnh.ops.OpsData.Usage u : v.usage) providers.add(u.provider);
+            for (String g : groups) if (!g.isEmpty()) out.add(new Object[] { g, "Group " + g, 0x2FA3A0 });
+            for (String s : sources) if (!s.isEmpty()) out.add(new Object[] { s, "Source " + s, 0x7DA2F0 });
+            for (String p : providers) if (!p.isEmpty()) out.add(new Object[] { p, "Provider " + p, 0x9B6FD6 });
+            return out;
+        }
     }
 
     @Override
@@ -131,6 +178,7 @@ public class ClientProxy extends CommonProxy {
         @SubscribeEvent
         public void onDisconnect(FMLNetworkEvent.ClientDisconnectionFromServerEvent e) {
             ClientHq.reset();
+            dev.agentcraft.gtnh.client.DecisionToast.INSTANCE.reset();
             dev.agentcraft.gtnh.client.edit.ClientEdit.reset();
             dev.agentcraft.gtnh.ui.panel.PanelLayout.serverDisplay("{}");
         }

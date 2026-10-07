@@ -10,6 +10,8 @@ public final class PanelType {
 
     /** What the binding names: an agent id, a board slug, an agent or "fleet", nothing, or (sign) the overflow pointer. */
     public static final String AGENT = "agent", BOARD = "board", LAMP = "agent-or-fleet", NONE = "none", SIGN = "sign";
+    /** Card 5b: an ops filter ("all", or a service group / ops source id / provider), see {@link PanelTypes#choices}. */
+    public static final String OPS = "ops";
 
     public final String id, name, description, source, previewPanel;
     public final boolean faced, resizable, placeable;
@@ -36,7 +38,7 @@ public final class PanelType {
 
     /** Default binding for a fresh panel of this kind ("all" for board panels, else unbound). */
     public String defaultBinding() {
-        return BOARD.equals(source) ? "all" : LAMP.equals(source) ? "fleet" : "";
+        return BOARD.equals(source) || OPS.equals(source) ? "all" : LAMP.equals(source) ? "fleet" : "";
     }
 
     public PanelSpec fresh(String facing) {
@@ -51,6 +53,7 @@ public final class PanelType {
             case SIGN:
                 return b.isEmpty();
             case BOARD:
+            case OPS:
                 return b.isEmpty() || "all".equals(b) || PanelSpec.BINDING.matcher(b)
                     .matches();
             case LAMP:

@@ -32,36 +32,55 @@ class MappingTest(unittest.TestCase):
     def test_agents_are_profiles_plus_cron(self):
         self.assertEqual(
             sorted(self.agents),
-            sorted(["default", "claude-builder", "sol-reviewer", "claude-builder-sonnet", "astra-ultimate", "cron"]),
+            sorted(["default", "builder-a", "reviewer-a", "builder-b", "helper-a", "cron"]),
         )
         self.assertEqual(self.agents["default"]["role"], "lead")
-        self.assertEqual(self.agents["claude-builder"]["name"], "Opus Builder")
+        self.assertEqual(self.agents["builder-a"]["name"], "Builder A")
         for a in self.agents.values():
             self.assertRegex(a["color"], r"^#[0-9A-F]{6}$")
             self.assertLessEqual(len(a["activity"]), 48)
 
+    def test_private_cast_file_is_loaded_from_the_hermes_home(self):
+        import contextlib
+        import io
+
+        from hermes_adapter.__main__ import main
+        from hermes_adapter.mapping import CAST_FILE_NAME, load_cast
+
+        cast = {"builder-a": {"name": "Ada", "title": "Night shift", "color": "#123456", "junk": 5}, "bad": 3}
+        (self.f.home / CAST_FILE_NAME).write_text(json.dumps(cast))
+        self.assertEqual(load_cast(self.f.home / CAST_FILE_NAME),
+                         {"builder-a": {"name": "Ada", "title": "Night shift", "color": "#123456"}})
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            self.assertEqual(main(["--hermes-home", str(self.f.home), "--once", "--log-level", "ERROR"]), 0)
+        agents = {a["id"]: a for a in json.loads(out.getvalue())["agents"]}
+        self.assertEqual((agents["builder-a"]["name"], agents["builder-a"]["title"], agents["builder-a"]["color"]),
+                         ("Ada", "Night shift", "#123456"))
+        self.assertEqual(agents["builder-b"]["name"], "Builder B", "profiles not in the cast keep the generic name")
+
     def test_running_builder_is_editing_with_progress_line(self):
-        a = self.agents["claude-builder"]
+        a = self.agents["builder-a"]
         self.assertEqual(a["state"], "editing")
         self.assertEqual(a["station"], "desk")
         self.assertEqual(a["taskId"], "t_build")
         self.assertEqual(a["activity"], "wiring the websocket bridge")
 
     def test_blocked_needs_input_is_waiting_user(self):
-        a = self.agents["sol-reviewer"]
+        a = self.agents["reviewer-a"]
         self.assertEqual(a["state"], "waiting_user")
         self.assertEqual(a["station"], "user")
         self.assertTrue(a["activity"].startswith("Question:"))
 
     def test_idle_and_cron(self):
-        self.assertEqual(self.agents["astra-ultimate"]["state"], "idle")
+        self.assertEqual(self.agents["helper-a"]["state"], "idle")
         self.assertEqual(self.agents["cron"]["station"], "terminal")
-        self.assertTrue(self.agents["cron"]["activity"].startswith("next nest.ops.daily"))
+        self.assertTrue(self.agents["cron"]["activity"].startswith("next ops.daily-report"))
 
     def test_task_mapping_and_deps(self):
         t = self.tasks["t_build"]
         self.assertEqual(t["status"], "doing")
-        self.assertEqual(t["assignee"], "claude-builder")
+        self.assertEqual(t["assignee"], "builder-a")
         self.assertEqual(t["deps"], ["t_parent"])
         self.assertEqual(t["priority"], 80)
         self.assertEqual(t["createdBy"], "user")
@@ -75,7 +94,7 @@ class MappingTest(unittest.TestCase):
         (d,) = self.model["decisions"]
         self.assertEqual(d["status"], "open")
         self.assertEqual(d["kind"], "question")
-        self.assertEqual(d["agentId"], "sol-reviewer")
+        self.assertEqual(d["agentId"], "reviewer-a")
         self.assertEqual(d["options"], ["Yes", "No", "Later"])
         self.assertEqual(parse_decision_reason("PERMISSION p1: rm x on host || CHOICES: Approve | Deny")[0], "permission")
 
@@ -85,12 +104,12 @@ class MappingTest(unittest.TestCase):
         model, _ = build(self.f.home)
         (d,) = model["decisions"]
         self.assertEqual(d["status"], "answered")
-        self.assertNotEqual({a["id"]: a for a in model["agents"]}["sol-reviewer"]["state"], "waiting_user")
+        self.assertNotEqual({a["id"]: a for a in model["agents"]}["reviewer-a"]["state"], "waiting_user")
 
     def test_no_secrets_or_personal_notes_anywhere(self):
         blob = json.dumps(self.model)
         for bad in (FAKE_TOKEN, FAKE_GH, "hunter2", "auth.json", "personal-schedule", "personal-health",
-                    "private details", "SECRET PROMPT", "discord:", "/home/aiops"):
+                    "private details", "SECRET PROMPT", "discord:", "/home/user"):
             self.assertNotIn(bad, blob, bad)
         self.assertEqual(self.tasks["t_personal"]["description"], "[withheld: mentions personal notes]")
         # card 3: the library exists now, but only from already-filtered board text, never memory files
@@ -99,28 +118,28 @@ class MappingTest(unittest.TestCase):
 
     def test_logs_and_feed(self):
         logs = {l["agentId"]: l["entries"] for l in self.model["logs"]}
-        texts = [e["text"] for e in logs["claude-builder"]]
+        texts = [e["text"] for e in logs["builder-a"]]
         self.assertTrue(any("claimed t_build" in t for t in texts))
         self.assertTrue(any("wiring the websocket bridge" in t for t in texts))
         self.assertTrue(all(len(v) <= 60 for v in logs.values()))
         kinds = [f["text"] for f in self.model["feed"]]
-        self.assertTrue(any(t.startswith("Opus Builder picked up") for t in kinds))
-        self.assertTrue(any("cron nest.ops.daily ran: ok" in t for t in kinds))
+        self.assertTrue(any(t.startswith("Builder A picked up") for t in kinds))
+        self.assertTrue(any("cron ops.daily-report ran: ok" in t for t in kinds))
         ts = [f["ts"] for f in self.model["feed"]]
         self.assertEqual(ts, sorted(ts))
 
     def test_error_and_done_states(self):
         self.f.sql("UPDATE task_runs SET status='crashed', ended_at=?, outcome='crashed' WHERE task_id='t_build'", (self.now - 60,))
         model, _ = build(self.f.home)
-        self.assertEqual({a["id"]: a for a in model["agents"]}["claude-builder"]["state"], "error")
-        self.f.run("t_build", "claude-builder", status="done", started=self.now - 50, ended=self.now - 10, outcome="completed")
+        self.assertEqual({a["id"]: a for a in model["agents"]}["builder-a"]["state"], "error")
+        self.f.run("t_build", "builder-a", status="done", started=self.now - 50, ended=self.now - 10, outcome="completed")
         model, _ = build(self.f.home)
-        self.assertEqual({a["id"]: a for a in model["agents"]}["claude-builder"]["state"], "done")
+        self.assertEqual({a["id"]: a for a in model["agents"]}["builder-a"]["state"], "done")
 
     def test_reviewer_run_reads_in_library(self):
-        self.f.run("t_wait", "sol-reviewer")
+        self.f.run("t_wait", "reviewer-a")
         model, _ = build(self.f.home)
-        a = {a["id"]: a for a in model["agents"]}["sol-reviewer"]
+        a = {a["id"]: a for a in model["agents"]}["reviewer-a"]
         self.assertEqual((a["state"], a["station"]), ("reading", "library"))
 
     def test_source_is_read_only(self):

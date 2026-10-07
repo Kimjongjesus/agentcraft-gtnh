@@ -74,8 +74,8 @@ class ServerTest(unittest.TestCase):
         for k in ("foreman", "agents", "tasks", "decisions", "repos", "memory", "goals", "feed", "logs"):
             self.assertIn(k, snap)
         # card 3: one goal per board; the current goal is the most recently active board
-        self.assertEqual(snap["goal"]["id"], "board-homelab")
-        self.assertEqual([g["id"] for g in snap["goals"]], ["board-homelab"])
+        self.assertEqual(snap["goal"]["id"], "board-main")
+        self.assertEqual([g["id"] for g in snap["goals"]], ["board-main"])
         ack = c.recv()
         self.assertEqual(ack, {"v": 1, "type": "ack", "re": "h1", "ok": True})
         c.close()
@@ -84,10 +84,10 @@ class ServerTest(unittest.TestCase):
         c = self.client()
         c.send({"type": "hello", "modVersion": "test", "protocol": 1})
         c.recv()
-        self.f.comment("t_build", "claude-builder", "PROGRESS: now testing the bridge", at=int(time.time()))
-        m = self.recv_until(c, lambda m: m["type"] == "agent.upsert" and m["agent"]["id"] == "claude-builder")
+        self.f.comment("t_build", "builder-a", "PROGRESS: now testing the bridge", at=int(time.time()))
+        m = self.recv_until(c, lambda m: m["type"] == "agent.upsert" and m["agent"]["id"] == "builder-a")
         self.assertEqual(m["agent"]["activity"], "now testing the bridge")
-        self.recv_until(c, lambda m: m["type"] == "agent.log" and m["agentId"] == "claude-builder")
+        self.recv_until(c, lambda m: m["type"] == "agent.log" and m["agentId"] == "builder-a")
         c.close()
 
     def test_incremental_upserts_never_carry_canaries(self):
@@ -98,7 +98,7 @@ class ServerTest(unittest.TestCase):
         canary_note = "CANARY" + "_PRIVATE_NOTE_LINE"
         canary_secret = "SYNTHETIC" + "_SECRET_CANARY"
         now = int(time.time())
-        self.f.comment("t_build", "claude-builder", f"PROGRESS: {canary_note}\nSource: personal-" + "schedule.md", at=now)
+        self.f.comment("t_build", "builder-a", f"PROGRESS: {canary_note}\nSource: personal-" + "schedule.md", at=now)
         self.f.sql("UPDATE tasks SET body=? WHERE id='t_build'", (f"deploy --password {canary_secret} now",))
         seen: list[dict] = []
         got = {"agent": None, "task": None, "log": False}
@@ -109,11 +109,11 @@ class ServerTest(unittest.TestCase):
             except Exception:
                 break
             seen.append(m)
-            if m["type"] == "agent.upsert" and m["agent"]["id"] == "claude-builder":
+            if m["type"] == "agent.upsert" and m["agent"]["id"] == "builder-a":
                 got["agent"] = m["agent"]
             elif m["type"] == "task.upsert" and m["task"]["id"] == "t_build":
                 got["task"] = m["task"]
-            elif m["type"] == "agent.log" and m["agentId"] == "claude-builder":
+            elif m["type"] == "agent.log" and m["agentId"] == "builder-a":
                 got["log"] = True
         c.close()
         blob = json.dumps(seen)
@@ -131,7 +131,7 @@ class ServerTest(unittest.TestCase):
         c.recv()
         canary = "SYNTHETIC" + "_SECRET_CANARY"
         now = int(time.time())
-        self.f.comment("t_build", "claude-builder", f"PLAN: ship it with --token {canary}", at=now)
+        self.f.comment("t_build", "builder-a", f"PLAN: ship it with --token {canary}", at=now)
         self.f.sql("UPDATE tasks SET status='done', completed_at=? WHERE id='t_build'", (now,))
         seen: list[dict] = []
         end = time.time() + 6
@@ -142,7 +142,7 @@ class ServerTest(unittest.TestCase):
                 break
         c.close()
         goal = [m["goal"] for m in seen if m["type"] == "goal.upsert"]
-        mem = [m["entry"] for m in seen if m["type"] == "memory.upsert" and m["entry"]["id"] == "claude-builder/plan-t_build"]
+        mem = [m["entry"] for m in seen if m["type"] == "memory.upsert" and m["entry"]["id"] == "builder-a/plan-t_build"]
         self.assertTrue(goal and goal[-1]["counts"]["done"] == 2, goal)
         self.assertTrue(mem, [m["type"] for m in seen])
         self.assertIn("--token [redacted]", mem[-1]["body"])
@@ -157,7 +157,7 @@ class ServerTest(unittest.TestCase):
             {"type": "user.message", "to": "all", "text": "hi"},
             {"type": "decision.answer", "decisionId": "d1", "option": "Yes"},
             {"type": "task.action", "taskId": "t_build", "action": "cancel"},
-            {"type": "agent.action", "agentId": "claude-builder", "action": "stop"},
+            {"type": "agent.action", "agentId": "builder-a", "action": "stop"},
             {"type": "repo.add", "path": "/tmp"},
         ]):
             c.send({**msg, "id": f"m{i}"})

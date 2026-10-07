@@ -22,7 +22,7 @@ import cpw.mods.fml.relauncher.SideOnly;
 /**
  * Placeable HQ blocks. Card 2: an agent monitor, a status lamp and the fleet beacon. Card 3: the
  * task wall (a W x H screen of the Kanban), the library (opens a read-only reader) and the goal
- * atrium (progress ring panel). They are plain blocks with a binding; Eli places and breaks them
+ * atrium (progress ring panel). They are plain blocks with a binding; the player places and breaks them
  * like any block (they drop themselves). Bind with /agentcraft bind ... while looking at one.
  * Right-clicking a task wall / atrium / library opens a client-only screen: nothing is sent to the
  * server (read-only, no decision answering).
@@ -35,11 +35,37 @@ public class BlockAgentCraft extends BlockContainer {
         BEACON,
         TASKWALL,
         LIBRARY,
-        ATRIUM;
+        ATRIUM,
+        // card 5b: ops panels (read-only screens like the task wall)
+        FLEETBOARD,
+        CRONBOARD,
+        USAGE,
+        ALERTS;
 
         /** Blocks that face the player who places them (metadata 2..5) and draw on their front. */
         public boolean faced() {
-            return this == MONITOR || this == TASKWALL || this == ATRIUM || this == LIBRARY;
+            return this == MONITOR || this == TASKWALL || this == ATRIUM || this == LIBRARY || ops();
+        }
+
+        /** Card 5b: one of the four ops panels. */
+        public boolean ops() {
+            return this == FLEETBOARD || this == CRONBOARD || this == USAGE || this == ALERTS;
+        }
+
+        /** Card 5b: the panel-kind id (= block registry name) of an ops kind. */
+        public String opsType() {
+            switch (this) {
+                case FLEETBOARD:
+                    return dev.agentcraft.gtnh.ops.OpsPanels.FLEET;
+                case CRONBOARD:
+                    return dev.agentcraft.gtnh.ops.OpsPanels.CRON;
+                case USAGE:
+                    return dev.agentcraft.gtnh.ops.OpsPanels.USAGE;
+                case ALERTS:
+                    return dev.agentcraft.gtnh.ops.OpsPanels.ALERTS;
+                default:
+                    return "";
+            }
         }
 
         public String id() {
@@ -75,6 +101,14 @@ public class BlockAgentCraft extends BlockContainer {
                 return new TileAgentCraft.Library();
             case ATRIUM:
                 return new TileAgentCraft.Atrium();
+            case FLEETBOARD:
+                return new TileAgentCraft.OpsFleet();
+            case CRONBOARD:
+                return new TileAgentCraft.OpsCron();
+            case USAGE:
+                return new TileAgentCraft.OpsUsage();
+            case ALERTS:
+                return new TileAgentCraft.OpsAlerts();
             default:
                 return new TileAgentCraft.Beacon();
         }
@@ -108,6 +142,16 @@ public class BlockAgentCraft extends BlockContainer {
             return true;
         }
         if (w.isRemote) return true;
+        if (kind.ops()) {
+            // card 5b: read-only ops screens; say what this one shows and how to filter it
+            p.addChatMessage(
+                new ChatComponentText(
+                    "[AgentCraft] this " + kind.opsType()
+                        .replace('_', ' ') + " shows "
+                        + (b.isEmpty() || "all".equals(b) ? "every ops source" : "the filter '" + b + "'")
+                        + ". Ops: look at it and /agentcraft bind <all|group|source|provider>"));
+            return true;
+        }
         String what = kind == Kind.BEACON ? "the whole fleet"
             : b.isEmpty() ? (kind == Kind.LAMP ? "the whole fleet (unbound)" : "nothing yet (unbound)")
                 : "fleet".equals(b) ? "the whole fleet" : "agent " + b;
@@ -163,6 +207,15 @@ public class BlockAgentCraft extends BlockContainer {
                 break;
             case ATRIUM:
                 front = reg.registerIcon(p + "atrium_front");
+                side = reg.registerIcon(p + "monitor_side");
+                top = side;
+                break;
+            case FLEETBOARD:
+            case CRONBOARD:
+            case USAGE:
+            case ALERTS:
+                // card 5b: the screen covers the front; reuse the existing textures (no new assets)
+                front = reg.registerIcon(p + "taskwall_front");
                 side = reg.registerIcon(p + "monitor_side");
                 top = side;
                 break;

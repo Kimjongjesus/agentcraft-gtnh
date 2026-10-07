@@ -43,6 +43,14 @@ public final class GoalPanel implements PanelRenderer {
         int dec = link ? v.goal.openDecisions : 0;
         int decColor = Theme.mix(th.accent, th.text, 0.35F * PanelText.pulse(c.now));
         String decText = !link ? "Hermes adapter offline" : dec > 0 ? PanelText.plural(dec, "decision needs you", "decisions need you") : "no decisions waiting";
+        // card 5b: the atrium also reflects ops (worst of agents and ops, like the fleet beacon)
+        String ow = dev.agentcraft.gtnh.state.ClientOps.worst();
+        if (link && !"none".equals(ow)) {
+            int oc = "error".equals(ow) ? 0xC2413B : "warn".equals(ow) ? 0xE8A93A : 0x5DAA68;
+            String ot = "error".equals(ow) ? "ops: problem" : "warn".equals(ow) ? "ops: warning" : "ops ok";
+            float os = c.lod == PanelContext.FAR ? Math.min(c.em(0.24), c.w * 0.07F) : c.em(0.075);
+            Ui.pillRight(bold, ot, c.w - pad * 0.6F, pad * 0.6F, os, oc);
+        }
 
         if (c.lod == PanelContext.FAR) {
             float big = Math.min(c.em(0.85), c.w * 0.32F);

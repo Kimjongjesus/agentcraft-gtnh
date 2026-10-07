@@ -115,8 +115,11 @@ public final class PanelPreview {
                 return "binds to an agent or the fleet";
             case PanelType.SIGN:
                 return "a vanilla sign you place";
-            default:
-                return "no binding";
+            default: {
+                // card 5b: a registered binding source describes itself
+                dev.agentcraft.gtnh.edit.PanelTypes.BindingChoices bc = dev.agentcraft.gtnh.edit.PanelTypes.choices(t.source);
+                return bc != null ? bc.hint() : "no binding";
+            }
         }
     }
 

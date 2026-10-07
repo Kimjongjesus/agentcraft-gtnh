@@ -25,7 +25,7 @@ public final class ClientHq {
     public static volatile boolean haveBoard, haveLibrary;
 
     private static final Object LOCK = new Object();
-    private static final Assembly BOARD = new Assembly(), LIBRARY = new Assembly();
+    private static final Assembly BOARD = new Assembly(), LIBRARY = new Assembly(), OPS = new Assembly(), DECISIONS = new Assembly();
 
     private ClientHq() {}
 
@@ -38,7 +38,8 @@ public final class ClientHq {
 
     public static void acceptPart(byte kind, int gen, int index, int count, byte[] data) {
         if (count <= 0 || count > Net.Blob.MAX_PARTS || index < 0 || index >= count) return;
-        Assembly a = kind == Net.Blob.BOARD ? BOARD : kind == Net.Blob.LIBRARY ? LIBRARY : null;
+        Assembly a = kind == Net.Blob.BOARD ? BOARD
+            : kind == Net.Blob.LIBRARY ? LIBRARY : kind == Net.Blob.OPS ? OPS : kind == Net.Blob.DECISIONS ? DECISIONS : null;
         if (a == null) return;
         byte[] whole = null;
         synchronized (LOCK) {
@@ -60,6 +61,10 @@ public final class ClientHq {
             }
         }
         if (whole == null) return;
+        if (kind == Net.Blob.OPS || kind == Net.Blob.DECISIONS) {
+            ClientOps.accept(kind, whole); // card 5b
+            return;
+        }
         try (DataInputStream in = new DataInputStream(new ByteArrayInputStream(whole))) {
             if (kind == Net.Blob.BOARD) {
                 List<HqData.Task> t = new ArrayList<>();
@@ -87,10 +92,11 @@ public final class ClientHq {
     /** Left the server: forget its board and library (a different server must not show them). */
     public static void reset() {
         synchronized (LOCK) {
-            BOARD.parts = LIBRARY.parts = null;
-            BOARD.got = LIBRARY.got = 0;
-            BOARD.gen = LIBRARY.gen = Integer.MIN_VALUE;
+            BOARD.parts = LIBRARY.parts = OPS.parts = DECISIONS.parts = null;
+            BOARD.got = LIBRARY.got = OPS.got = DECISIONS.got = 0;
+            BOARD.gen = LIBRARY.gen = OPS.gen = DECISIONS.gen = Integer.MIN_VALUE;
         }
+        ClientOps.reset();
         tasks = Collections.emptyList();
         goals = Collections.emptyList();
         notes = Collections.emptyList();

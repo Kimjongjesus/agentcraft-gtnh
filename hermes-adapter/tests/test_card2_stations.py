@@ -1,5 +1,5 @@
 """Card 2 (in-world HQ): station assignments and per-agent log tails, the fields the GTNH mod's
-NPC walker, desk monitors and "waiting on Eli" markers read.
+NPC walker, desk monitors and "waiting on the player" markers read.
 
 Every assertion runs on the SERIALIZED snapshot (what goes on the wire) and on the incremental
 messages (agent.upsert / agent.log), like the card 1 privacy tests.
@@ -54,21 +54,21 @@ class StationSnapshotTest(unittest.TestCase):
         agents = {a["id"]: a for a in snap["agents"]}
         for a in agents.values():
             self.assertIn(a["station"], STATIONS, a["id"])
-        self.assertEqual(agents["claude-builder"]["station"], "desk")  # live builder run
-        self.assertEqual(agents["sol-reviewer"]["station"], "user")  # needs_input block -> waiting on Eli
-        self.assertEqual(agents["sol-reviewer"]["state"], "waiting_user")
+        self.assertEqual(agents["builder-a"]["station"], "desk")  # live builder run
+        self.assertEqual(agents["reviewer-a"]["station"], "user")  # needs_input block -> waiting on the player
+        self.assertEqual(agents["reviewer-a"]["state"], "waiting_user")
         self.assertEqual(agents["cron"]["station"], "terminal")
         self.assertEqual(agents["default"]["station"], "lounge")
-        # astra has no runs and no session mtime: off shift -> lounge
-        self.assertFalse(agents["astra-ultimate"]["active"])
-        self.assertEqual(agents["astra-ultimate"]["station"], "lounge")
+        # helper-a has no runs and no session mtime: off shift -> lounge
+        self.assertFalse(agents["helper-a"]["active"])
+        self.assertEqual(agents["helper-a"]["station"], "lounge")
 
     def test_reviewer_live_run_is_library(self):
-        self.f.task("t_rev", "Review it", "running", "sol-reviewer")
+        self.f.task("t_rev", "Review it", "running", "reviewer-a")
         self.f.sql("UPDATE tasks SET status='done' WHERE id='t_wait'")
-        self.f.run("t_rev", "sol-reviewer")
+        self.f.run("t_rev", "reviewer-a")
         agents = {a["id"]: a for a in snapshot(self.f.home)["agents"]}
-        self.assertEqual((agents["sol-reviewer"]["state"], agents["sol-reviewer"]["station"]), ("reading", "library"))
+        self.assertEqual((agents["reviewer-a"]["state"], agents["reviewer-a"]["station"]), ("reading", "library"))
 
     def test_mapping_without_a_station_falls_back(self):
         class NoStation(Mapper):
@@ -78,15 +78,15 @@ class StationSnapshotTest(unittest.TestCase):
                 return agent
 
         agents = {a["id"]: a for a in snapshot(self.f.home, NoStation())["agents"]}
-        self.assertEqual(agents["claude-builder"]["station"], "desk")  # editing -> desk
-        self.assertEqual(agents["sol-reviewer"]["station"], "lounge")  # waiting_user, not working -> lounge
+        self.assertEqual(agents["builder-a"]["station"], "desk")  # editing -> desk
+        self.assertEqual(agents["reviewer-a"]["station"], "lounge")  # waiting_user, not working -> lounge
         self.assertEqual(agents["default"]["station"], "lounge")
 
     def test_decision_marks_the_waiting_agent(self):
         """The "!" marker: an open decision whose agentId is the waiting agent."""
         snap = snapshot(self.f.home)
         open_d = [d for d in snap["decisions"] if d["status"] == "open"]
-        self.assertEqual([d["agentId"] for d in open_d], ["sol-reviewer"])
+        self.assertEqual([d["agentId"] for d in open_d], ["reviewer-a"])
         self.assertEqual(open_d[0]["options"], ["Yes", "No", "Later"])
 
 
@@ -103,9 +103,9 @@ class MonitorLogTailTest(unittest.TestCase):
 
     def test_tail_is_bounded_and_ordered(self):
         for i in range(80):
-            self.f.comment("t_build", "claude-builder", f"PROGRESS: step {i}", at=self.now - 1000 + i)
+            self.f.comment("t_build", "builder-a", f"PROGRESS: step {i}", at=self.now - 1000 + i)
         logs = {l["agentId"]: l["entries"] for l in snapshot(self.f.home)["logs"]}
-        tail = logs["claude-builder"]
+        tail = logs["builder-a"]
         self.assertLessEqual(len(tail), 60)
         self.assertEqual([e["ts"] for e in tail], sorted(e["ts"] for e in tail))
         for e in tail:
@@ -113,9 +113,9 @@ class MonitorLogTailTest(unittest.TestCase):
 
     def test_log_lines_never_carry_canaries_snapshot(self):
         canary = "CANARY" + "_MONITOR_LINE"
-        self.f.comment("t_build", "claude-builder", f"PROGRESS: fine first line\n{canary}\nsee personal-" + "notes.md", at=self.now - 5)
-        self.f.comment("t_build", "claude-builder", f"ran deploy --api-key {FAKE_TOKEN[:8]}XYZ123456 ok", at=self.now - 4)
-        rid = self.f.run("t_build", "claude-builder")
+        self.f.comment("t_build", "builder-a", f"PROGRESS: fine first line\n{canary}\nsee personal-" + "notes.md", at=self.now - 5)
+        self.f.comment("t_build", "builder-a", f"ran deploy --api-key {FAKE_TOKEN[:8]}XYZ123456 ok", at=self.now - 4)
+        rid = self.f.run("t_build", "builder-a")
         self.f.event("t_build", "heartbeat", {"note": "login --password Hunter2Secret!\nthen deploy"}, run_id=rid, at=self.now - 3)
         self.f.event("t_build", "heartbeat", {"note": f"{canary} on the first line\nsource: memory/personal-" + "x.md"}, run_id=rid, at=self.now - 2)
         blob = json.dumps(snapshot(self.f.home)["logs"])
@@ -153,32 +153,32 @@ class IncrementalStationTest(unittest.TestCase):
     def test_station_follows_the_run(self):
         # builder finishes -> lounge (done)
         self.f.sql("UPDATE task_runs SET ended_at=?, status='done', outcome='completed' WHERE task_id='t_build'", (self.now,))
-        a = self.upsert(self.changes(), "claude-builder")
+        a = self.upsert(self.changes(), "builder-a")
         self.assertEqual((a["state"], a["station"]), ("done", "lounge"))
-        # sonnet picks up a card -> desk
-        self.f.task("t_new", "New work", "running", "claude-builder-sonnet")
-        self.f.run("t_new", "claude-builder-sonnet")
-        a = self.upsert(self.changes(), "claude-builder-sonnet")
+        # builder-b picks up a card -> desk
+        self.f.task("t_new", "New work", "running", "builder-b")
+        self.f.run("t_new", "builder-b")
+        a = self.upsert(self.changes(), "builder-b")
         self.assertEqual((a["state"], a["station"]), ("editing", "desk"))
         # it blocks on a question -> user station (and the decision opens)
         self.f.sql("UPDATE task_runs SET ended_at=?, status='blocked', outcome='blocked' WHERE task_id='t_new'", (self.now,))
         self.f.sql("UPDATE tasks SET status='blocked', block_kind='needs_input' WHERE id='t_new'")
         self.f.event("t_new", "blocked", {"reason": "PERMISSION p1: reboot? || CHOICES: Approve | Deny", "kind": "needs_input"}, at=self.now)
         msgs = self.changes()
-        a = self.upsert(msgs, "claude-builder-sonnet")
+        a = self.upsert(msgs, "builder-b")
         self.assertEqual((a["state"], a["station"]), ("waiting_user", "user"))
         dec = [m["decision"] for m in msgs if m["type"] == "decision.upsert"]
-        self.assertTrue(any(d["agentId"] == "claude-builder-sonnet" and d["status"] == "open" and d["kind"] == "permission" for d in dec))
+        self.assertTrue(any(d["agentId"] == "builder-b" and d["status"] == "open" and d["kind"] == "permission" for d in dec))
         for m in msgs:
             if m["type"] == "agent.upsert":
                 self.assertIn(m["agent"]["station"], STATIONS)
 
     def test_incremental_log_lines_are_filtered(self):
         canary = "CANARY" + "_LIVE_MONITOR"
-        self.f.comment("t_build", "claude-builder", f"PROGRESS: ok line\n{canary} in personal-" + "x.md", at=self.now + 1)
-        self.f.comment("t_build", "claude-builder", "deploy --token Sup3rS3cretT0ken now", at=self.now + 2)
+        self.f.comment("t_build", "builder-a", f"PROGRESS: ok line\n{canary} in personal-" + "x.md", at=self.now + 1)
+        self.f.comment("t_build", "builder-a", "deploy --token Sup3rS3cretT0ken now", at=self.now + 2)
         msgs = self.changes()
-        logs = [m for m in msgs if m["type"] == "agent.log" and m["agentId"] == "claude-builder"]
+        logs = [m for m in msgs if m["type"] == "agent.log" and m["agentId"] == "builder-a"]
         self.assertTrue(logs, "agent.log arrived")
         blob = json.dumps(logs)
         self.assertNotIn("CANARY", blob)

@@ -1,19 +1,19 @@
 # Hermes -> AgentCraft mapping
 
 The adapter (`python3 -m hermes_adapter`) plays the **Foreman** side of the AgentCraft protocol v1
-(`../docs/protocol.md`) but its source of truth is Hermes on ai-ops, read strictly read-only.
+(`../docs/protocol.md`) but its source of truth is a Hermes installation, read strictly read-only.
 Code: `hermes_adapter/mapping.py` (pure function, unit-tested in `tests/test_mapping.py`).
 
 ## Sources (all read-only)
 
 | Hermes source | How it is read | Used for |
 | --- | --- | --- |
-| Kanban boards `~/.hermes/kanban/boards/<slug>/kanban.db` | SQLite `mode=ro` + `PRAGMA query_only` (default), or `hermes kanban --board <b> list --json` with `--source cli` | tasks, runs, events, comments, links |
-| Profiles `~/.hermes/profiles/*` + `default` | directory names only | one Agent per profile |
+| Kanban boards `<hermes home>/kanban/boards/<slug>/kanban.db` | SQLite `mode=ro` + `PRAGMA query_only` (default), or `hermes kanban --board <b> list --json` with `--source cli` | tasks, runs, events, comments, links |
+| Profiles `<hermes home>/profiles/*` + `default` | directory names only | one Agent per profile |
 | Sessions | **mtime only** of each profile's `state.db`/`sessions` (content never opened) | `active` (seen in the last 7 days) |
-| Cron `~/.hermes/cron/jobs.json` | only `name, enabled, state, last_status, last_run_at, next_run_at, failure_streak, schedule` | the `cron` "Scheduler" agent + feed |
+| Cron `<hermes home>/cron/jobs.json` | only `name, enabled, state, last_status, last_run_at, next_run_at, failure_streak, schedule` | the `cron` "Scheduler" agent + feed |
 
-Boards default to every board except `*scratch*`; `--boards homelab,ai-ops` overrides. Archived
+Boards default to every board except `*scratch*`; `--boards main,ops` overrides. Archived
 cards are skipped; `done` cards are kept for 3 days (the goal ring additionally counts every done
 card on the board, a number only). Never read: memory files, `personal-*.md`,
 `auth.json`, `.env`, cron prompts/delivery targets/errors, session transcripts, attachments.
@@ -44,8 +44,8 @@ other intent.
 
 | field | value |
 | --- | --- |
-| `id` | profile name, lowercased (`claude-builder`), `cron` for the scheduler |
-| `name`, `role`, `title` | built-in cast (`default` = "Goon Goblin", lead; `claude-builder` = "Opus Builder"; ...), override with `--cast cast.json`; unknown profiles are title-cased workers |
+| `id` | profile name, lowercased (`builder-a`), `cron` for the scheduler |
+| `name`, `role`, `title` | built-in cast only for Hermes' own `default` ("Lead", lead) and `cron` ("Scheduler"); every other profile is a title-cased worker (`builder-a` = "Builder A"); a private cast file (`--cast cast.json` or `agentcraft-cast.json` in the Hermes home) overrides names, roles, titles and colours |
 | `color` | stable palette pick from a hash of the id; `accent` fixed |
 | `skin` | the id (the GTNH mod falls back to the Steve skin) |
 | `state` / `station` / `activity` | see table below |
@@ -64,7 +64,7 @@ State rules, first match wins:
 | otherwise | `idle` | `lounge` | "idle - last: <title>" / "idle" / "off shift" |
 | `cron` agent | `running` if a job's state is running, `error` if any enabled job is failing, else `idle` | `terminal` | "next <job> HH:MM" / "N failing: <job>" |
 
-An agent that is waiting on Eli (row 2) is always `active: true`, even when the profile has had no
+An agent that is waiting on the player (row 2) is always `active: true`, even when the profile has had no
 run for 7 days: waiting is not "off shift", and the in-world NPC must stand at the `user` station
 with its "!" marker instead of being parked in the lounge.
 
@@ -108,7 +108,7 @@ still blocked, else `answered`. The whole reason is redacted and checked for per
 references BEFORE it is split into question and options; if it mentions personal notes the
 question is withheld and no options are sent. The agent is the profile of the run that blocked
 (joined on board + run id), else the card's assignee. Answering in-game is refused (see below):
-Eli answers through the intake, as today.
+The owner answers outside the game, as today.
 
 ### Multiple boards
 
@@ -132,7 +132,7 @@ canaries and flag-style secrets and check both the snapshot and the live `agent.
 
 ### FeedItem (`feed[]` / `feed.add`, <= 200)
 
-Card events ("Opus Builder picked up ...", "... is waiting: ...", "... finished ...", errors) and
+Card events ("Builder A picked up ...", "... is waiting: ...", "... finished ...", errors) and
 cron runs in the last 3 days ("cron <name> ran: ok").
 
 ### Goal (one per board; card 3 atrium, `goals[]` / `goal.upsert`)
@@ -161,9 +161,9 @@ adapter already sends elsewhere, never from Hermes memory:
 | plan / handoff / review verdict | newest `PLAN:` / `HANDOFF:` / `PASS` `REVISE` `VERIFICATION` comment per card and author, written by an agent profile (log tails) | `<agent>/<kind>-<card>` |
 | done summary | result summary of the 12 newest done cards (`Task.summary`) | `shared/done-<card>` |
 | board overview | per board: counts plus up to 8 card titles per open column (`Task.title`) | `shared/board-<slug>` |
-| waiting on Eli | the question and choices of every open decision (`Decision.question`) | `<agent>/decision-<id>` |
+| waiting on the player | the question and choices of every open decision (`Decision.question`) | `<agent>/decision-<id>` |
 
-Comments by anyone who is not an agent profile (Eli, the intake) are left out, and so are comments
+Comments by anyone who is not an agent profile (the owner, or a front-door agent relaying for them) are left out, and so are comments
 without one of those prefixes. Every body is filtered as a whole source by `clean()` (flag-style
 secrets, tokens, home paths, personal-note references -> whole text withheld) BEFORE it is cut to
 1200 chars. An entry that drops out (decision answered, note aged out) is sent once as a tombstone
@@ -176,7 +176,7 @@ privacy on both the full snapshot and the incremental messages.
 
 ### Not mapped (always empty)
 
-`repos`. `foreman` = `{backend: "claude", auth: "ok", message: "Hermes ai-ops (read-only) ...", adapter:
+`repos`. `foreman` = `{backend: "claude", auth: "ok", message: "Hermes (read-only) ...", adapter:
 "hermes", readOnly: true}`; `backend` stays inside the upstream enum so the upstream schema and
 Fabric mod accept it.
 
@@ -230,8 +230,8 @@ again asserted on the serialized snapshot, and
 ## Network exposure
 
 Default bind `127.0.0.1:7878`, loopback peers and loopback Host headers only. Any `Origin` header
-(including `null`) is refused with 401, as upstream does. A wildcard bind is refused. For the
-gaming-spare test server:
+(including `null`) is refused with 401, as upstream does. A wildcard bind is refused. For a
+test game server on the LAN:
 
     python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20
 

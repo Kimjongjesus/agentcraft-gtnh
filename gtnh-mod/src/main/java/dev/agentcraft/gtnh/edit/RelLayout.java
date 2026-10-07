@@ -107,7 +107,7 @@ public final class RelLayout {
         r.name = name;
         r.facing = "north";
         int q = Math.floorMod(-PanelSpec.quarterOf(PanelSpec.facingOrNorth(facing)), 4);
-        Map<String, String> agents = new LinkedHashMap<>(), boards = new LinkedHashMap<>();
+        Map<String, String> agents = new LinkedHashMap<>(), boards = new LinkedHashMap<>(), filters = new LinkedHashMap<>();
         for (Map.Entry<Pos, PanelSpec> e : panels.entrySet()) {
             Pos p = e.getKey();
             int dx = p.x - origin.x, dy = p.y - origin.y, dz = p.z - origin.z;
@@ -120,10 +120,11 @@ public final class RelLayout {
                 String b = s.binding;
                 if (!b.isEmpty() && !"all".equals(b) && !"fleet".equals(b)) {
                     boolean board = t != null && PanelType.BOARD.equals(t.source);
-                    Map<String, String> m = board ? boards : agents;
+                    boolean ops = t != null && PanelType.OPS.equals(t.source);
+                    Map<String, String> m = board ? boards : ops ? filters : agents;
                     String ph = m.get(b);
                     if (ph == null) {
-                        ph = (board ? "board-" : "agent-") + (m.size() + 1);
+                        ph = (board ? "board-" : ops ? "filter-" : "agent-") + (m.size() + 1);
                         m.put(b, ph);
                     }
                     b = ph;
@@ -148,7 +149,7 @@ public final class RelLayout {
         return r;
     }
 
-    /** desk_claude-builder -> desk_agent-1 (same placeholder as that agent's monitor binding). */
+    /** desk_builder-a -> desk_agent-1 (same placeholder as that agent's monitor binding). */
     static String stripPersonal(String n, Map<String, String> agents) {
         for (String st : StationAssigner.STATIONS) {
             if (!n.startsWith(st + "_")) continue;

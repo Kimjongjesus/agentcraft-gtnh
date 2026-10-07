@@ -61,6 +61,8 @@ public final class AgentWorldSync {
     private final StationAssigner assigner = new StationAssigner();
     /** Card 3: tasks, goals and library notes for the task wall, atrium and library. */
     public final BoardSync board = new BoardSync();
+    /** Card 5b: ops feeds and the open decisions (decision toast) for the clients. */
+    public final OpsSync ops = new OpsSync();
     private Map<String, StationAssigner.Target> targets = Collections.emptyMap();
     private HqAnchors anchors;
     private boolean linkUp;
@@ -86,6 +88,7 @@ public final class AgentWorldSync {
         lastSign = "";
         snapshots = upserts = logMessages = decisionMessages = otherMessages = stateChanges = duplicatesRemoved = 0;
         board.reset();
+        ops.reset();
         anchors = new HqAnchors(new File(Config.anchorsFile), Config.spawnDimension);
         anchors.load();
         assigner.resetWarnings();
@@ -160,6 +163,10 @@ public final class AgentWorldSync {
             }
         }
         tick++;
+        // card 5b: ops + decision blobs; a new worst ops state re-sends the fleet colour
+        String opsBefore = ops.opsWorst();
+        ops.tick(tick, agents, linkUp);
+        if (!opsBefore.equals(ops.opsWorst())) dirty = true;
         if (dirty || tick % 20 == 0) {
             reconcile();
         }
@@ -180,6 +187,7 @@ public final class AgentWorldSync {
         if (e.player instanceof EntityPlayerMP) {
             needsLogs.add((EntityPlayerMP) e.player);
             board.playerJoined((EntityPlayerMP) e.player);
+            ops.playerJoined((EntityPlayerMP) e.player);
         }
     }
 
@@ -215,6 +223,7 @@ public final class AgentWorldSync {
                         array(o, "entries"));
                 }
                 openDecisions.clear();
+                ops.decisionsReset();
                 for (JsonElement el : array(m, "decisions")) {
                     if (el.isJsonObject()) applyDecision(el.getAsJsonObject());
                 }
@@ -245,6 +254,7 @@ public final class AgentWorldSync {
                 AgentInfo a = AgentInfo.fromJson(m.getAsJsonObject("agent"));
                 if (a.id.isEmpty()) return;
                 AgentInfo prev = agents.put(a.id, a);
+                if (prev == null || !prev.name.equals(a.name) || prev.color != a.color) ops.agentsChanged();
                 if (Config.verboseLog && (prev == null || !prev.state.equals(a.state)
                     || !prev.station.equals(a.station)
                     || !prev.activity.equals(a.activity))) {
@@ -282,11 +292,13 @@ public final class AgentWorldSync {
                 break;
             case "_disconnected":
                 linkUp = false;
+                ops.linkDown();
                 AgentCraftGTNH.LOG.warn("Hermes adapter disconnected; NPCs show 'adapter offline' until it is back");
                 dirty = true;
                 break;
             default:
-                if (!board.apply(type, m)) otherMessages++; // feed and the rest: not shown in-world
+                // feed and the rest: not shown in-world; card 5b: ops.* go to OpsSync (read-only)
+                if (!board.apply(type, m) && !ops.apply(type, m)) otherMessages++;
         }
     }
 
@@ -318,6 +330,7 @@ public final class AgentWorldSync {
             .getAsString() : "";
         if ("open".equals(status) && !agent.isEmpty()) openDecisions.put(id, agent);
         else openDecisions.remove(id);
+        ops.applyDecision(d);
     }
 
     private void readStatus(JsonObject s) {
@@ -327,7 +340,7 @@ public final class AgentWorldSync {
 
     // ---- views ----------------------------------------------------------------------------
 
-    /** The adapter's agent plus the server-computed "waiting on Eli" flag. */
+    /** The adapter's agent plus the server-computed "waiting on the player" flag. */
     private AgentInfo withWaiting(AgentInfo raw) {
         AgentInfo a = raw.copy();
         a.waiting = "waiting".equals(AgentInfo.family(a.state, a.active)) || openDecisions.containsValue(a.id);
@@ -351,8 +364,12 @@ public final class AgentWorldSync {
         return out;
     }
 
+    /**
+     * Card 5b: worst of (agents, ops) for the fleet beacon, lamps bound to "fleet" and the atrium:
+     * see {@link dev.agentcraft.gtnh.ops.OpsData#combineFleet}.
+     */
     public String fleetFamily() {
-        return AgentInfo.fleetFamily(allViews(), linkUp);
+        return dev.agentcraft.gtnh.ops.OpsData.combineFleet(AgentInfo.fleetFamily(allViews(), linkUp), ops.opsWorst());
     }
 
     // ---- world ----------------------------------------------------------------------------
@@ -488,7 +505,7 @@ public final class AgentWorldSync {
                         a.family(),
                         a.name,
                         a.stateLine(),
-                        a.waiting ? " | ! waiting on Eli" : "");
+                        a.waiting ? " | ! waiting on you" : "");
                 }
             }
         }
@@ -584,7 +601,7 @@ public final class AgentWorldSync {
         return ent;
     }
 
-    /** Eli's overflow sign (anchor overflow_sign = a vanilla sign he placed): "+N more agents". */
+    /** The player's overflow sign (anchor overflow_sign = a vanilla sign they placed): "+N more agents". */
     private void updateOverflowSign(WorldServer world, List<String> over) {
         Anchor s = anchors.get(HqAnchors.OVERFLOW_SIGN);
         if (s == null) return;

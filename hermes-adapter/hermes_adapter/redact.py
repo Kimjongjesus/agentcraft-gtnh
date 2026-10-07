@@ -4,7 +4,7 @@ Every free-text string that leaves the adapter (titles, comments, block reasons,
 lines, cron names) goes through :func:`clean`. The rules are deliberately blunt: the viewer is a
 Minecraft world, so losing a bit of detail is fine and leaking a token is not.
 
-1. Anything that references Eli's personal notes (``personal-*.md`` or a ``memory/personal`` path)
+1. Anything that references the owner's personal notes (``personal-*.md`` or a ``memory/personal`` path)
    is withheld entirely, not just the path: the surrounding text may quote the note. The check
    always runs on the whole source text; :func:`clean_excerpt` cuts a display line out only after
    the whole text passed, so splitting can never separate a quote from its personal-notes hint.

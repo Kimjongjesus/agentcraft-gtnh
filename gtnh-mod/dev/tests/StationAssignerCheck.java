@@ -39,7 +39,7 @@ public class StationAssignerCheck {
     }
 
     /**
-     * Card 4: 12 agents all waiting on Eli, two "user" slots in a nook whose first-ring spots are
+     * Card 4: 12 agents all waiting on the player, two "user" slots in a nook whose first-ring spots are
      * desks and whose back and sides are walls (the scene that stacked everyone on one spot): every
      * agent gets its own standable cell, no two share a cell, nobody is on a desk or wall.
      */
@@ -161,7 +161,7 @@ public class StationAssignerCheck {
         t = new StationAssigner().assign(w4, new HashMap<String, Anchor>());
         eq(null, t.get("opus"), "no anchors -> legacy row");
 
-        // no anchors yet, then Eli sets some: the missing station is still reported once (the
+        // no anchors yet, then the player sets some: the missing station is still reported once (the
         // anchor-less phase must not use up the per-station warning)
         StationAssigner s6 = new StationAssigner();
         List<Want> w6 = new ArrayList<>();
@@ -188,7 +188,7 @@ public class StationAssignerCheck {
         eq(180.0F, Anchor.parseFacing("north"), "north");
         eq(-90.0F, Anchor.parseFacing("east"), "east");
         eq("west", Anchor.facingName(90), "facing name");
-        eq(true, StationAssigner.isStandingAnchor("desk_claude-builder"), "personal anchor stands");
+        eq(true, StationAssigner.isStandingAnchor("desk_builder-a"), "personal anchor stands");
         eq(false, StationAssigner.isStandingAnchor("overflow_sign"), "block anchor");
         System.out.println("StationAssignerCheck OK: " + checks + " checks");
     }

@@ -1,1 +1,1 @@
-"""Read-only AgentCraft protocol adapter for Hermes (ai-ops)."""
+"""Read-only AgentCraft protocol adapter for Hermes."""

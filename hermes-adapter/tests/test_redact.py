@@ -28,9 +28,9 @@ class RedactTest(unittest.TestCase):
         self.assertIn("password=", out)
 
     def test_url_credentials(self):
-        out = clean("clone https://eli:s3cr3t@git.example.com/repo.git")
+        out = clean("clone https://alice:s3cr3t@git.example.com/repo.git")
         self.assertNotIn("s3cr3t", out)
-        self.assertNotIn("eli:", out)
+        self.assertNotIn("alice:", out)
         self.assertIn("https://", out)
 
     def test_private_key_block(self):
@@ -45,20 +45,20 @@ class RedactTest(unittest.TestCase):
 
     def test_personal_notes_withheld(self):
         self.assertEqual(clean("see personal-schedule.md for times"), WITHHELD)
-        self.assertEqual(clean("~/.claude/projects/-home-aiops/memory/personal-*.md"), WITHHELD)
+        self.assertEqual(clean("~/.claude/projects/-home-user/memory/personal-*.md"), WITHHELD)
         self.assertEqual(clean("x memory/personal stuff"), WITHHELD)
 
     def test_paths(self):
-        self.assertEqual(clean("edit /home/aiops/homelab/scripts/alerts/golden_flow.py now"), "edit .../golden_flow.py now")
-        self.assertEqual(clean("read ~/gtnh-dev/server/server.properties"), "read .../server.properties")
-        self.assertEqual(clean("cat /home/aiops/.hermes/auth.json"), "cat [path]")
+        self.assertEqual(clean("edit /home/user/project/scripts/tools/flow.py now"), "edit .../flow.py now")
+        self.assertEqual(clean("read ~/dev-copy/server/server.properties"), "read .../server.properties")
+        self.assertEqual(clean("cat /home/user/.config/tool/auth.json"), "cat [path]")
         self.assertEqual(clean("source /srv/app/.env"), "source [path]")
         self.assertEqual(clean("editing src/cli.ts"), "editing src/cli.ts")
         self.assertEqual(clean("see https://github.com/x/y"), "see https://github.com/x/y")
         self.assertEqual(clean("/answer d1 2"), "/answer d1 2")
 
     def test_email_whitespace_truncate(self):
-        self.assertEqual(clean("mail eli@example.com"), "mail [email]")
+        self.assertEqual(clean("mail owner@example.com"), "mail [email]")
         self.assertEqual(clean("a\n\tb   c"), "a b c")
         out = clean("x" * 100, limit=10)
         self.assertEqual(len(out), 10)
@@ -66,7 +66,7 @@ class RedactTest(unittest.TestCase):
         self.assertEqual(clean(None), "")
 
     def test_clean_id(self):
-        self.assertEqual(clean_id("Claude-Builder"), "claude-builder")
+        self.assertEqual(clean_id("Builder-A"), "builder-a")
         self.assertEqual(clean_id("a b/c"), "a-b-c")
         self.assertEqual(clean_id(""), "unknown")
 
