@@ -10,6 +10,11 @@ Ops feeds (docs/ops-protocol.md) are off unless a source is given:
     python3 -m hermes_adapter --ops-mock                      # generic demo data
     python3 -m hermes_adapter --ops-plugin path/to/plugin     # a .py file, package dir, module[:factory] or ep:<name>
     python3 -m hermes_adapter --ops-mock --ops-once           # print one ops.snapshot as JSON and exit
+
+Factory telemetry (world.*, docs/world-protocol.md) is off unless a world source is given:
+
+    python3 -m hermes_adapter --factory-token-file ~/.config/agentcraft/aifactory-token.txt
+    python3 -m hermes_adapter --world-plugin path/to/plugin   # same plugin forms as --ops-plugin
 """
 
 from __future__ import annotations
@@ -25,11 +30,15 @@ from pathlib import Path
 from typing import Any
 
 from . import redact
+from .journal import JournalError, Retention, WorldJournal
 from .mapping import Mapper
 from .ops import OpsHub, load_plugin
 from .ops_mock import MockOpsSource
 from .server import LOOPBACK_HOSTS, AccessPolicy, AdapterServer
 from .sources import HermesSource, env_hermes_home
+from .sources import factory
+from .sources.plugin import load_plugin as load_world_plugin
+from .world_hub import WorldHub
 
 log = logging.getLogger("hermes_adapter")
 
@@ -59,7 +68,49 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--allow-ip-text", action="store_true",
                    help="do NOT redact IPv4/IPv6 addresses in text sent to clients (redacted by default)")
     p.add_argument("--log-level", default="INFO")
+    w = p.add_argument_group("factory telemetry (world.*, docs/world-protocol.md)")
+    w.add_argument("--factory-url", default=None, help="aifactory telemetry base URL, e.g. http://127.0.0.1:25580 "
+                   "(enables the factory source; default from $AGENTCRAFT_FACTORY_URL when --factory-token-file is set)")
+    w.add_argument("--factory-token-file", type=Path, default=None,
+                   help="file holding the telemetry token (chmod 600). There is deliberately no flag for the token itself")
+    w.add_argument("--factory-interval", type=float, default=30.0, help="seconds between telemetry polls (min 10)")
+    w.add_argument("--factory-allow-remote", action="store_true",
+                   help="allow a non-loopback telemetry URL (the token then crosses the network; prefer an SSH tunnel)")
+    w.add_argument("--world-plugin", default=None, help="custom world source plugin (module[:factory] or .py path)")
+    w.add_argument("--journal", type=Path, default=None, help="world journal file (default ~/.local/state/agentcraft-gtnh/)")
+    w.add_argument("--no-journal", action="store_true", help="do not keep a world journal")
+    w.add_argument("--journal-days", type=float, default=30.0, help="keep journal events and samples this many days")
+    w.add_argument("--world-once", action="store_true", help="poll the world source once, print world.snapshot, exit")
     return p.parse_args(argv)
+
+
+def build_world(args: argparse.Namespace) -> WorldHub | None:
+    """The world hub for the configured source, or None when no world source was asked for."""
+    if not (args.factory_url or args.factory_token_file or args.world_plugin):
+        return None
+    try:
+        if args.world_plugin:
+            try:
+                sources = load_world_plugin(args.world_plugin, {"interval": args.factory_interval})
+            except (ValueError, ImportError) as e:
+                # the shared loader's messages can quote a plugin's repr: filter them like --ops-plugin
+                raise ValueError(redact.clean(str(e), 300)) from None
+        else:
+            sources = factory.create_sources({
+                "url": args.factory_url, "token_file": args.factory_token_file, "interval": args.factory_interval,
+                "allow_remote": args.factory_allow_remote,
+            })
+    except (factory.ConfigError, ValueError, ImportError) as e:
+        raise SystemExit(f"world source: {e}") from None
+    if len(sources) != 1:
+        raise SystemExit("world source: exactly one source per adapter is supported")
+    journal = None
+    if not args.no_journal and not args.world_once:
+        try:
+            journal = WorldJournal(args.journal, Retention(max_age_days=max(1.0, args.journal_days)))
+        except (JournalError, OSError) as e:
+            raise SystemExit(f"world journal: {e}") from None
+    return WorldHub(sources[0], journal)
 
 
 def build_policy(args: argparse.Namespace) -> AccessPolicy:
@@ -136,6 +187,22 @@ def main(argv: list[str] | None = None) -> int:
             ops.close()
         print(json.dumps({"v": 1, **snap}, indent=2, ensure_ascii=False))
         return 0
+    try:
+        world = build_world(args)
+    except BaseException:
+        if ops is not None:
+            ops.close()
+        raise
+    if args.world_once:
+        if ops is not None:
+            ops.close()
+        if world is None:
+            raise SystemExit("--world-once needs --factory-url / --factory-token-file or --world-plugin")
+        world.poll()
+        snap = world.snapshot_message()
+        world.close()
+        print(json.dumps({"v": 1, **snap}, indent=2, ensure_ascii=False))
+        return 0 if snap["source"]["state"] in ("ok", "stale", "starting") else 1
     cast = json.loads(args.cast.read_text()) if args.cast else None
     source = HermesSource(
         hermes_home=args.hermes_home or env_hermes_home(),
@@ -150,10 +217,12 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps({"v": 1, **server.snapshot()}, indent=2, ensure_ascii=False))
         if ops is not None:
             ops.close()
+        if world is not None:
+            world.close()
         return 0
     policy = build_policy(args)
     server = AdapterServer(source.read, mapper, host=args.bind, port=args.port, policy=policy, poll_interval=args.poll,
-                           ops=ops, ops_tick=args.ops_tick)
+                           ops=ops, ops_tick=args.ops_tick, world=world)
 
     async def run() -> None:
         await server.start()

@@ -1,0 +1,21 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "Read-only GTNH base telemetry (scoped incremental captures, token-gated loopback HTTP). No world actions.",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "https://github.com/Kimjongjesus/agentcraft-gtnh",
+		"updateUrl": "",
+		"authorList": ["Kimjongjesus"],
+		"credits": "Part of AgentCraft GTNH. Build template: GTNewHorizons/ExampleMod1.7.10 (MIT).",
+		"logoFile": "",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": [],
+		"dependencies": [],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}

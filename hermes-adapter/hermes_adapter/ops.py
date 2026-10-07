@@ -624,23 +624,26 @@ def _stale_service(e: dict[str, Any], note: str, last_ok: float | None) -> dict[
 
 # ---------------------------------------------------------------------------------------------
 # plugin loading
+#
+# The same loader serves the adapter's other plugin kind, the world sources of card G1
+# (``sources/plugin.py``): ``kind`` only changes the wording of errors and the private module
+# name, ``group`` the entry-point group. The defaults are the ops ones.
 
-def _load_module_from_path(path: Path) -> Any:
+def _load_module_from_path(path: Path, kind: str = "ops") -> Any:
     path = path.expanduser().resolve()
     tag = hashlib.sha1(str(path).encode()).hexdigest()[:10]
+    name = f"_agentcraft_{kind}_plugin_{tag}"
     if path.is_dir():
         init = path / "__init__.py"
         if not init.is_file():
-            raise ValueError(f"ops plugin directory {path.name} has no __init__.py")
-        name = f"_agentcraft_ops_plugin_{tag}"
+            raise ValueError(f"{kind} plugin directory {path.name} has no __init__.py")
         spec = importlib.util.spec_from_file_location(name, init, submodule_search_locations=[str(path)])
     elif path.is_file() and path.suffix == ".py":
-        name = f"_agentcraft_ops_plugin_{tag}"
         spec = importlib.util.spec_from_file_location(name, path)
     else:
-        raise ValueError(f"ops plugin {path.name}: not a .py file or a package directory")
+        raise ValueError(f"{kind} plugin {path.name}: not a .py file or a package directory")
     if spec is None or spec.loader is None:
-        raise ValueError(f"cannot load ops plugin {path.name}")
+        raise ValueError(f"cannot load {kind} plugin {path.name}")
     if name in sys.modules:
         return sys.modules[name]
     module = importlib.util.module_from_spec(spec)
@@ -653,31 +656,31 @@ def _load_module_from_path(path: Path) -> Any:
     return module
 
 
-def _entry_point(name: str) -> Any:
+def _entry_point(name: str, kind: str = "ops", group: str = ENTRY_POINT_GROUP) -> Any:
     from importlib.metadata import entry_points
 
-    for ep in entry_points(group=ENTRY_POINT_GROUP):
+    for ep in entry_points(group=group):
         if ep.name == name:
             return ep.load()
-    raise ValueError(f"no installed ops plugin entry point {name!r} in group {ENTRY_POINT_GROUP}")
+    raise ValueError(f"no installed {kind} plugin entry point {name!r} in group {group}")
 
 
-def resolve_factory(spec: str) -> Callable[[dict[str, Any]], Any]:
+def resolve_factory(spec: str, *, kind: str = "ops", group: str = ENTRY_POINT_GROUP) -> Callable[[dict[str, Any]], Any]:
     """``spec`` -> plugin factory. Accepted forms:
 
     * a path to a ``.py`` file or a package directory (``__init__.py``) defining ``create_sources``;
     * ``package.module`` or ``package.module:factory`` (importable from ``sys.path``);
-    * ``ep:<name>``: an installed entry point in the ``agentcraft_gtnh.ops_sources`` group.
+    * ``ep:<name>``: an installed entry point in ``group`` (ops: ``agentcraft_gtnh.ops_sources``).
     """
     spec = spec.strip()
     if not spec:
-        raise ValueError("empty ops plugin spec")
+        raise ValueError(f"empty {kind} plugin spec")
     if spec.startswith("ep:"):
-        obj = _entry_point(spec[3:])
+        obj = _entry_point(spec[3:], kind, group)
     else:
         p = Path(spec).expanduser()
         if p.exists() or "/" in spec or spec.endswith(".py"):
-            obj = _load_module_from_path(p)
+            obj = _load_module_from_path(p, kind)
         else:
             mod_name, _, attr = spec.partition(":")
             obj = importlib.import_module(mod_name)
@@ -689,13 +692,14 @@ def resolve_factory(spec: str) -> Callable[[dict[str, Any]], Any]:
         fixed = obj.SOURCES
         obj = lambda _config: fixed  # noqa: E731
     if not callable(obj):
-        raise ValueError(f"ops plugin {spec!r} has no create_sources(config) factory")
+        raise ValueError(f"{kind} plugin {spec!r} has no create_sources(config) factory")
     return obj
 
 
-def load_plugin(spec: str, config: Mapping[str, Any] | None = None) -> list[Any]:
+def load_plugin(spec: str, config: Mapping[str, Any] | None = None, *, kind: str = "ops",
+                group: str = ENTRY_POINT_GROUP) -> list[Any]:
     """Load one plugin and return its sources (validated for the minimal interface)."""
-    factory = resolve_factory(spec)
+    factory = resolve_factory(spec, kind=kind, group=group)
     result = factory(dict(config or {}))
     if result is None:
         return []
@@ -704,5 +708,5 @@ def load_plugin(spec: str, config: Mapping[str, Any] | None = None) -> list[Any]
     sources = list(result)
     for src in sources:
         if not callable(getattr(src, "collect", None)) or not str(getattr(src, "id", "") or "").strip():
-            raise ValueError(f"ops plugin {spec!r} returned {src!r}, which lacks an id or collect()")
+            raise ValueError(f"{kind} plugin {spec!r} returned {src!r}, which lacks an id or collect()")
     return sources

@@ -23,6 +23,21 @@ events/comments the CLI `list` does not, a 3-second poll would otherwise spawn a
 every 3 s, and a `mode=ro` connection cannot write even by mistake (asserted in
 `test_source_is_read_only`). The CLI path stays available as `--source cli`.
 
+### Optional source: factory telemetry (card G1)
+
+| source | how it is read | used for |
+| --- | --- | --- |
+| the `aifactory` mod (`../gtnh-factory/`) | `GET /health`, `GET /telemetry/capture` with a bearer token from a `0600` file; no redirects, no proxy, size cap and total deadline per request (`sources/factory.py`) | `world.*` (`../docs/world-protocol.md`), only to clients that list `"world"` in `hello.features`; the world journal |
+
+It is the only thing the adapter writes besides its log: the world journal (`journal.py`, local
+SQLite, `0600`, refused inside this checkout and refused for any existing file that is not a world
+journal). Normalisation and change events: `world.py`; polling, sessions and source state:
+`world_hub.py`. The same privacy rules apply as below: every string from the game passes
+`redact.clean` over the whole text before it is cut, ids keep a strict character set, player
+names stay in the journal-only part (and are replaced by `[player]` where they appear in other
+text), logs carry states and counts only. `action.*` client messages are refused like every
+other intent.
+
 ## Entities
 
 ### Agent (one per Hermes profile, plus `cron`)
@@ -168,9 +183,11 @@ Fabric mod accept it.
 ## Client intents
 
 `hello` -> `snapshot` (+ `ack` if it had an id). `goal.submit`, `user.message`, `decision.answer`,
-`task.action`, `agent.action`, `repo.add` -> `ack {ok:false, error:"read-only Hermes view: ..."}`
-(or `error` without an id). `diff.request` -> an empty `diff` with `error`. Nothing is ever written
-to Hermes.
+`task.action`, `agent.action`, `repo.add` and every `action.*` type (reserved for world actions)
+-> `ack {ok:false, error:"read-only Hermes view: ..."}` (or `error` without an id). `diff.request`
+-> an empty `diff` with `error`. Nothing is ever written to Hermes or to the game. A hello that
+lists `"world"` in `features` also gets `world.snapshot` and then `world.*` messages
+(`../docs/world-protocol.md`); its `ack` then carries `result.features`.
 
 ## Secret stripping (`hermes_adapter/redact.py`)
 

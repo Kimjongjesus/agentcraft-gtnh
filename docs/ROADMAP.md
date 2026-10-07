@@ -15,6 +15,7 @@ Compatibility target: **GT New Horizons 2.9.x only** (Forge 1.7.10, Java 8 throu
 | 3 | Task wall, goal atrium and agent library blocks with a bounded board sync (read-only). |
 | 4 | Readable UI: a bundled TrueType font (Nunito, plus JetBrains Mono for logs and ids) drawn from a texture atlas, a small widget toolkit, a panel registry and an office layout file; wall, atrium, library and monitors rebuilt on it with distance-based level of detail; waiting agents fan out and nameplates no longer pile up; one source of truth for done counts with the window labelled ("last 3 days" vs "all time"). |
 | 6 | In-game office edit tool (op only): edit mode with an overlay, a Panel Inspector (rebind from a list, resize with a live preview, label, theme, duplicate, delete), a panel palette fed by the panel registry, an anchor editor, and a per-world layout with undo/redo, named snapshots with a diff, bundled presets and export/import with a dry run. It only ever places, moves or removes this mod's own panel blocks and anchors (never other blocks or machines); every change is audited, rate-limited and capped, and `/agentcraft edit lock` stops all of it server-wide. Still read-only towards Hermes. |
+| G1 | Factory telemetry: the read-only `aifactory` mod imported as `gtnh-factory/`, the opt-in `world.*` protocol extension, the adapter's factory source and a local world journal (see the GTNH agent track below). |
 
 ## Next
 
@@ -62,3 +63,63 @@ are advice only; anything that changes the world comes later and only tier by ti
 
 Hermes is the first adapter. The protocol and the mod must work with any adapter that speaks the
 protocol: nothing in the mod depends on Hermes beyond the messages in `docs/protocol.md`.
+
+## GTNH agent track: the factory joins the office (card G1)
+
+Compatibility target: GT New Horizons 2.9.x only (Forge 1.7.10).
+
+The office (`gtnh-mod/`) shows the agents; the factory module (`gtnh-factory/`) lets them see the
+base. Both ship from this repository as separate jars, and the adapter joins them:
+
+```
+GTNH server (Forge 1.7.10)
+  agentcraftgtnh  (office: NPCs, desks, panels)  <---- WebSocket: protocol v1 (+ opt-in world.*)
+  aifactory       (read-only telemetry)          ----> HTTP GET /health, /telemetry/* (token, loopback)
+                                                            |
+adapter (Hermes is the first; any adapter that speaks the protocol works)
+  sources/factory.py   poll, bound, privacy-filter    -> world.* to clients that ask for it
+  world journal        events + samples + snapshots   -> query CLI / API for agents
+                                                            |
+agents
+  the GTNH agent ("Oracle", later): reads the journal and the live world.* view through a scoped,
+  read-only toolset; appears in the office as an NPC with a desk (companion mode later)
+```
+
+| order | what | state |
+| --- | --- | --- |
+| 1 | factory telemetry imported as `gtnh-factory/` (read-only, token-gated loopback HTTP, budgeted capture); `world.*` protocol extension; adapter factory source; world journal with retention and a query CLI | card G1 |
+| 2 | the GTNH agent as a Hermes profile with scoped read tools over the journal and the live world view; desk in the office, chat through the same window as the other agents; advice: recipe chains, bottlenecks from the journal trends, proactive alerts as decision toasts | planned |
+| 3 | companion NPC that walks the base (toggleable) | planned |
+| 4 | vision on request | planned |
+| 5 | acting in the world, tier by tier (below) | planned |
+
+Card numbers after G1 are not decided; the order follows the plan.
+
+Learning, in order of arrival: the automatic world journal (G1), "remember this" notes, build
+history linked to cards and commits, a pack knowledge base (GT recipes and machines).
+
+### Acting stays out until each tier is reviewed
+
+`action.*` is reserved in the protocol and refused by the adapter. Acting (AE2 crafts, builds)
+comes as a **separate write module**, never inside the telemetry jar, one tier at a time:
+
+| tier | scope |
+| --- | --- |
+| 0 | read-only telemetry (G1) |
+| 1 | suggest only: plans a player carries out by hand |
+| 2 | single actions the player confirms in-game, each with an undo record |
+| 3+ | bounded autonomy, only while the player is online, with an agreed loss budget |
+
+Every tier gets its own design and security review and is tested on a copy of a world first.
+Leaving the write module out of a pack leaves everything read-only.
+
+### Integration surface for other projects
+
+- **Other adapters / agent frameworks:** speak `docs/protocol.md`; add `world.*`
+  (`docs/world-protocol.md`) to receive factory telemetry. The adapter side is Python standard
+  library only.
+- **Other GTNH servers:** drop in the `aifactory` jar, configure a base region and a token; the
+  telemetry routes are documented in `gtnh-factory/README.md`.
+- **Other data sources:** a world source plugin (`create_sources(config)` returning objects with
+  `id`, `interval`, `collect()`) can replace the factory source; the normalisation, bounds,
+  privacy filter and journal stay the same.

@@ -16,6 +16,15 @@ ExecStart=/usr/bin/python3 -m hermes_adapter --bind 192.0.2.10 --port 7878 --all
 # Ops feeds (docs/ops-protocol.md): add one or more private source plugins, e.g.
 #   ExecStart=/usr/bin/python3 -m hermes_adapter ... --ops-plugin %h/private/ops_plugin --ops-config %h/private/ops.json
 # IP addresses in text stay redacted unless --allow-ip-text is added.
+# Optional factory telemetry (card G1, docs/world-protocol.md): uncomment, point the token file at a
+# chmod 600 copy of the server's aifactory token, and let the unit write the world journal. With a
+# remote game server, reach its loopback telemetry port through an SSH tunnel, not a LAN bind.
+# (The home directory is already writable under ProtectSystem=full; ReadWritePaths only matters
+# if the unit is ever tightened to ProtectSystem=strict.) --ops-plugin and --factory-url combine.
+#Environment=AGENTCRAFT_FACTORY_TOKEN_FILE=%h/.config/agentcraft/aifactory-token.txt
+#ExecStart=
+#ExecStart=/usr/bin/python3 -m hermes_adapter --bind 192.0.2.10 --port 7878 --allow-peer 192.0.2.20 --poll 3 --factory-url http://127.0.0.1:25580
+#ReadWritePaths=%h/.local/state/agentcraft-gtnh
 Restart=on-failure
 RestartSec=10
 # read-only by design: the adapter opens every DB with mode=ro + query_only. The home directory

@@ -6,13 +6,15 @@ to Hermes (no kanban writes, no dispatches, no answers).
 
 Protocol extensions are opt-in per connection: a client lists them in ``hello.features``.
 ``"ops"`` (docs/ops-protocol.md) adds ``ops.snapshot`` after the normal snapshot and streams
-``ops.*`` upserts to that connection only, so upstream clients and schema validators never see a
-message type they do not know.
+``ops.*`` upserts to that connection only; ``"world"`` (docs/world-protocol.md) does the same with
+``world.snapshot`` and ``world.*`` (factory telemetry). Upstream clients and schema validators
+therefore never see a message type they do not know. ``action.*`` is reserved and refused.
 """
 
 from __future__ import annotations
 
 import asyncio
+import concurrent.futures
 import ipaddress
 import json
 import logging
@@ -27,14 +29,17 @@ from .ops import MAX as OPS_MAX
 from .ops import PLURAL as OPS_PLURAL
 from .ops import OpsHub
 from .sources import HermesData
+from .world import FEATURE as WORLD_FEATURE
+from .world_hub import WorldHub
 from .wsserver import UpgradeRequest, WSClosed, WSConnection, serve
 
 log = logging.getLogger("hermes_adapter")
 
 PROTOCOL_VERSION = 1
-FEATURES = (OPS_FEATURE,)  # protocol extensions this adapter understands (hello.features)
+FEATURES = (OPS_FEATURE, WORLD_FEATURE)  # protocol extensions this adapter understands (hello.features)
 MAX_FEATURES = 16
 MUTATING = {"goal.submit", "user.message", "decision.answer", "task.action", "agent.action", "repo.add"}
+MUTATING_PREFIXES = ("action.",)  # reserved for world actions (docs/world-protocol.md section 7)
 READ_ONLY_ERROR = "read-only Hermes view: {type} is disabled (change things in Hermes, not in-game)"
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
 
@@ -94,6 +99,8 @@ class AdapterServer:
         ops: OpsHub | None = None,
         ops_tick: float = 1.0,
         send_timeout: float = 10.0,
+        world: WorldHub | None = None,
+        world_tick: float = 1.0,
     ) -> None:
         self.read = read
         self.mapper = mapper
@@ -119,6 +126,12 @@ class AdapterServer:
         self.ops_clients: set[WSConnection] = set()
         self.ops_ticks = 0
         self.ops_error: str | None = None
+        # world.* extension (docs/world-protocol.md): clients that opt in get a world.snapshot even
+        # when no telemetry source is configured (source.state "off"), so "off" differs from "old adapter"
+        self.world = world or WorldHub(None)
+        self.world_tick = max(0.05, float(world_tick))
+        self.world_clients: set[WSConnection] = set()
+        self._world_pool: concurrent.futures.ThreadPoolExecutor | None = None
 
     # ---- model ---------------------------------------------------------------------------
     async def refresh(self) -> list[dict[str, Any]]:
@@ -241,10 +254,19 @@ class AdapterServer:
                 if conn in self.ops_clients:
                     await self.send(conn, msg)
 
+    async def broadcast_world(self, msgs: list[dict[str, Any]]) -> None:
+        """world.* messages go only to connections that opted in with hello.features ["world"]."""
+        targets = list(self.world_clients)
+        for msg in msgs:
+            for conn in targets:
+                if conn in self.world_clients:
+                    await self.send(conn, msg)
+
     def _drop(self, conn: WSConnection) -> None:
         self.clients.discard(conn)
         self.hello.discard(conn)
         self.ops_clients.discard(conn)
+        self.world_clients.discard(conn)
 
     async def handle_message(self, conn: WSConnection, raw: str) -> None:
         if raw == "\x00binary":
@@ -267,6 +289,8 @@ class AdapterServer:
             # every hello re-decides the opt-in, so a reconnecting client never keeps a stale one
             if OPS_FEATURE not in features:
                 self.ops_clients.discard(conn)
+            if WORLD_FEATURE not in features:
+                self.world_clients.discard(conn)
             await self.send(conn, self.snapshot())
             if OPS_FEATURE in features:
                 # build the ops snapshot and join the broadcast set with no await in between: every
@@ -275,6 +299,12 @@ class AdapterServer:
                 ops_snap = self.ops_snapshot()
                 self.ops_clients.add(conn)
                 await self.send(conn, ops_snap)
+            if WORLD_FEATURE in features:
+                # build the world snapshot and join the broadcast set with no await in between, so every
+                # later world.* message starts from (at least) the model this snapshot shows
+                world_snap = self.world.snapshot_message()
+                self.world_clients.add(conn)
+                await self.send(conn, world_snap)
             if mid:
                 ack: dict[str, Any] = {"type": "ack", "re": mid, "ok": True}
                 if "features" in msg:  # only clients that asked learn what was granted
@@ -283,9 +313,9 @@ class AdapterServer:
             return
         if conn not in self.hello:  # lenient like upstream: first message counts as hello
             self.hello.add(conn)
-        if mtype in MUTATING:
-            err = READ_ONLY_ERROR.format(type=mtype)
-            log.info("refused %s from %s (read-only)", mtype, conn.request.peer)
+        if mtype in MUTATING or mtype.startswith(MUTATING_PREFIXES):
+            err = READ_ONLY_ERROR.format(type=mtype[:40])
+            log.info("refused %s from %s (read-only)", mtype[:40], conn.request.peer)
             if mid:
                 await self.send(conn, {"type": "ack", "re": mid, "ok": False, "error": err})
             else:
@@ -383,6 +413,23 @@ class AdapterServer:
                 await self.broadcast_ops(msgs)
             await asyncio.sleep(self.ops_tick)
 
+    async def world_loop(self) -> None:
+        """Poll the world source when it is due, in its own single worker thread (a slow game
+        server never blocks the Hermes poll or the WebSocket server), and stream the result."""
+        loop = asyncio.get_running_loop()
+        while True:
+            if self.world.due():
+                assert self._world_pool is not None
+                try:
+                    msgs = await loop.run_in_executor(self._world_pool, self.world.poll)
+                except Exception as e:  # WorldHub.poll handles source errors; this is a bug guard
+                    log.error("world poll crashed: %s", type(e).__name__)
+                    self.world.next_due = time.time() + self.world.interval
+                    msgs = []
+                if msgs:
+                    await self.broadcast_world(msgs)
+            await asyncio.sleep(self.world_tick)
+
     async def start(self) -> int:
         await self.refresh()
         self._server = await serve(self.host, self.port, self.on_connection, self.policy.refuse_reason, self._on_reject, max_message=64 * 1024)
@@ -392,6 +439,9 @@ class AdapterServer:
         if self.ops is not None:
             self.ops_model = self.ops.model()  # all sources "starting" until their first collect
             self._tasks.append(asyncio.create_task(self.ops_loop()))
+        if self.world.source is not None:
+            self._world_pool = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="world-source")
+            self._tasks.append(asyncio.create_task(self.world_loop()))
         log.info("listening on ws://%s:%d (hosts=%s peers=%s)", self.host, self.port, sorted(self.policy.allowed_hosts), [str(p) for p in self.policy.allowed_peers])
         if self.ops is not None:
             log.info("ops feed: %d source(s): %s", len(self.ops.slots), ", ".join(s.id for s in self.ops.slots))
@@ -407,6 +457,10 @@ class AdapterServer:
             await self._server.wait_closed()
         if self.ops is not None:
             self.ops.close()
+        if self._world_pool is not None:
+            self._world_pool.shutdown(wait=False, cancel_futures=True)
+            self._world_pool = None
+        self.world.close()
 
 
 def now_ms() -> int:
