@@ -13,15 +13,21 @@ After=network-online.target
 Type=simple
 WorkingDirectory=%h/agentcraft-gtnh/hermes-adapter
 ExecStart=/usr/bin/python3 -m hermes_adapter --bind 192.0.2.10 --port 7878 --allow-peer 192.0.2.20 --poll 3
+# Ops feeds (docs/ops-protocol.md): add one or more private source plugins, e.g.
+#   ExecStart=/usr/bin/python3 -m hermes_adapter ... --ops-plugin %h/private/ops_plugin --ops-config %h/private/ops.json
+# IP addresses in text stay redacted unless --allow-ip-text is added.
 Restart=on-failure
 RestartSec=10
-# read-only by design. ProtectHome=read-only is deliberately NOT set: SQLite readers of a WAL
-# database still need to update the -shm file, so a read-only home would break the kanban reads
-# (the adapter opens every DB with mode=ro + query_only instead). Untested as a unit: verify on
-# install with `journalctl --user -u hermes-agentcraft-adapter`.
+# read-only by design: the adapter opens every DB with mode=ro + query_only. The home directory
+# must stay WRITABLE for SQLite's coordination files, so ProtectSystem=full (only /usr, /boot,
+# /efi and /etc read-only) and NOT strict, and no ProtectHome=read-only: on a read-only home a
+# mode=ro reader cannot open a quiescent WAL-mode kanban.db (no -shm file yet), and the adapter
+# exits with "unable to open database file" (reproduced in a read-only mount namespace). The
+# database files themselves are never modified. Ops plugins that read /tmp need PrivateTmp=no.
+# Untested as a unit: verify on install with `journalctl --user -u hermes-agentcraft-adapter`.
 NoNewPrivileges=yes
 PrivateTmp=yes
-ProtectSystem=strict
+ProtectSystem=full
 MemoryMax=256M
 CPUQuota=25%
 

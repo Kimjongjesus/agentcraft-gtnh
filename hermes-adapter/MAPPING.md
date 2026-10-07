@@ -189,7 +189,18 @@ on a later line can never be separated from the line that is shown:
   long hex/base64 blobs -> `[redacted]` (the flag/key name is kept, the value is dropped);
 - absolute and `~/` paths -> `.../<last component>`, credential-looking files (`.env`, `*.pem`,
   `id_rsa`, `auth.json`, `*secret*`, `*token*`, ...) -> `[path]`;
+- credential-carrying URLs: long token user parts, credential query parameters (`?token=`,
+  `&key=`, `&sig=`, `X-Amz-Signature=` ...), Discord/Slack webhook paths and opaque mixed-case
+  path segments -> `[redacted]` (scheme and host kept);
+- IPv4 and IPv6 addresses -> `[ip]` (ports and `/prefix` lengths kept; candidates are validated
+  with `ipaddress`, so versions like `5.09.54.133`, times and MAC addresses survive). On by
+  default; `--allow-ip-text` turns only this rule off;
 - e-mail addresses -> `[email]`; control characters dropped; lengths capped.
+
+The same filter runs on every string of the `ops.*` extension, ids included
+([../docs/ops-protocol.md](../docs/ops-protocol.md) section 5); `tests/test_ops.py` and
+`tests/test_ops_server.py` plant the same kind of canaries in every ops field and in plugin
+error messages and assert on the normalized model and on the live WebSocket messages.
 
 `tests/test_mapping.py::test_no_secrets_or_personal_notes_anywhere` plants tokens, credentials,
 a personal-notes reference, a cron prompt and a delivery target in a fixture board and asserts none

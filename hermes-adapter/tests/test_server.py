@@ -37,6 +37,8 @@ class ServerThread:
         fut.result(5)
         self.loop.call_soon_threadsafe(self.loop.stop)
         self.thread.join(5)
+        if not self.thread.is_alive():
+            self.loop.close()
 
 
 class ServerTest(unittest.TestCase):

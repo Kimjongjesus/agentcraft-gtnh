@@ -4,6 +4,12 @@ Defaults are loopback-only. To let the gaming-spare test server connect, bind th
 and allow that one peer explicitly, e.g.:
 
     python3 -m hermes_adapter --bind 192.0.2.10 --allow-peer 192.0.2.20
+
+Ops feeds (docs/ops-protocol.md) are off unless a source is given:
+
+    python3 -m hermes_adapter --ops-mock                      # generic demo data
+    python3 -m hermes_adapter --ops-plugin path/to/plugin     # a .py file, package dir, module[:factory] or ep:<name>
+    python3 -m hermes_adapter --ops-mock --ops-once           # print one ops.snapshot as JSON and exit
 """
 
 from __future__ import annotations
@@ -16,10 +22,16 @@ import logging
 import signal
 import sys
 from pathlib import Path
+from typing import Any
 
+from . import redact
 from .mapping import Mapper
+from .ops import OpsHub, load_plugin
+from .ops_mock import MockOpsSource
 from .server import LOOPBACK_HOSTS, AccessPolicy, AdapterServer
 from .sources import HermesSource, env_hermes_home
+
+log = logging.getLogger("hermes_adapter")
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -35,6 +47,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--poll", type=float, default=3.0, help="seconds between Hermes reads")
     p.add_argument("--cast", type=Path, default=None, help="JSON {profile: {name, role, title, color}} overrides")
     p.add_argument("--once", action="store_true", help="print one snapshot as JSON and exit")
+    g = p.add_argument_group("ops feeds (docs/ops-protocol.md)")
+    g.add_argument("--ops-plugin", action="append", default=[], metavar="SPEC",
+                   help="load ops sources from a .py file, a package directory, module[:factory] or ep:<entry point> (repeatable)")
+    g.add_argument("--ops-config", type=Path, default=None, metavar="FILE",
+                   help="JSON object handed to every plugin's create_sources(config); never sent to clients")
+    g.add_argument("--ops-mock", action="store_true", help="add the generic mock ops source (demo data, RFC 5737 addresses)")
+    g.add_argument("--ops-mock-interval", type=float, default=10.0, help="seconds between mock collects (default 10)")
+    g.add_argument("--ops-tick", type=float, default=1.0, help="seconds between ops schedule checks (default 1)")
+    g.add_argument("--ops-once", action="store_true", help="collect every ops source once, print the ops.snapshot as JSON and exit")
+    p.add_argument("--allow-ip-text", action="store_true",
+                   help="do NOT redact IPv4/IPv6 addresses in text sent to clients (redacted by default)")
     p.add_argument("--log-level", default="INFO")
     return p.parse_args(argv)
 
@@ -54,9 +77,65 @@ def build_policy(args: argparse.Namespace) -> AccessPolicy:
     return policy
 
 
+def load_ops_config(path: Path | None) -> dict[str, Any]:
+    if path is None:
+        return {}
+    try:
+        data = json.loads(path.expanduser().read_text())
+    except (OSError, ValueError) as e:
+        # the message names the file only: a parse error could quote a line of a private config
+        raise SystemExit(f"--ops-config {path.name}: cannot read a JSON object ({type(e).__name__})") from None
+    if not isinstance(data, dict):
+        raise SystemExit(f"--ops-config {path.name}: expected a JSON object")
+    return data
+
+
+def build_ops(args: argparse.Namespace) -> OpsHub | None:
+    """The OpsHub for the configured sources, or None when no ops source is configured."""
+    sources: list[Any] = []
+    if args.ops_mock:
+        sources.append(MockOpsSource(interval=args.ops_mock_interval))
+    if args.ops_plugin:
+        config = load_ops_config(args.ops_config)
+        for spec in args.ops_plugin:
+            try:
+                loaded = load_plugin(spec, config)
+            except Exception as e:  # noqa: BLE001 - report which plugin failed, then stop
+                raise SystemExit(f"--ops-plugin {spec}: {type(e).__name__}: {redact.clean(str(e), 300)}") from None
+            log.info("ops plugin %s: %d source(s)", spec, len(loaded))
+            sources.extend(loaded)
+    elif args.ops_config is not None:
+        raise SystemExit("--ops-config needs at least one --ops-plugin")
+    if not sources:
+        return None
+    try:
+        return OpsHub(sources)
+    except ValueError as e:
+        raise SystemExit(f"ops sources: {e}") from None
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
+    # privacy first: the switch must be set before any source text is cleaned
+    redact.set_redact_ips(not args.allow_ip_text)
+    if args.allow_ip_text:
+        log.warning("--allow-ip-text: IP addresses in agent/ops text are sent to clients unredacted")
+    ops = build_ops(args)
+    if args.ops_once:
+        if ops is None:
+            raise SystemExit("--ops-once needs --ops-mock or --ops-plugin")
+
+        async def once() -> dict[str, Any]:
+            await ops.collect_all()
+            return ops.snapshot()
+
+        try:
+            snap = asyncio.run(once())
+        finally:
+            ops.close()
+        print(json.dumps({"v": 1, **snap}, indent=2, ensure_ascii=False))
+        return 0
     cast = json.loads(args.cast.read_text()) if args.cast else None
     source = HermesSource(
         hermes_home=args.hermes_home or env_hermes_home(),
@@ -69,9 +148,12 @@ def main(argv: list[str] | None = None) -> int:
         server = AdapterServer(source.read, mapper)
         server.model = mapper.build(source.read())
         print(json.dumps({"v": 1, **server.snapshot()}, indent=2, ensure_ascii=False))
+        if ops is not None:
+            ops.close()
         return 0
     policy = build_policy(args)
-    server = AdapterServer(source.read, mapper, host=args.bind, port=args.port, policy=policy, poll_interval=args.poll)
+    server = AdapterServer(source.read, mapper, host=args.bind, port=args.port, policy=policy, poll_interval=args.poll,
+                           ops=ops, ops_tick=args.ops_tick)
 
     async def run() -> None:
         await server.start()

@@ -3,6 +3,11 @@
 hello -> snapshot -> incremental upserts, exactly like foreman/src/server.ts, but every client
 intent that would change something is refused with ``ack {ok:false}``: this adapter never writes
 to Hermes (no kanban writes, no dispatches, no answers).
+
+Protocol extensions are opt-in per connection: a client lists them in ``hello.features``.
+``"ops"`` (docs/ops-protocol.md) adds ``ops.snapshot`` after the normal snapshot and streams
+``ops.*`` upserts to that connection only, so upstream clients and schema validators never see a
+message type they do not know.
 """
 
 from __future__ import annotations
@@ -16,12 +21,19 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from .mapping import Mapper
+from .ops import FEATURE as OPS_FEATURE
+from .ops import KINDS as OPS_KINDS
+from .ops import MAX as OPS_MAX
+from .ops import PLURAL as OPS_PLURAL
+from .ops import OpsHub
 from .sources import HermesData
 from .wsserver import UpgradeRequest, WSClosed, WSConnection, serve
 
 log = logging.getLogger("hermes_adapter")
 
 PROTOCOL_VERSION = 1
+FEATURES = (OPS_FEATURE,)  # protocol extensions this adapter understands (hello.features)
+MAX_FEATURES = 16
 MUTATING = {"goal.submit", "user.message", "decision.answer", "task.action", "agent.action", "repo.add"}
 READ_ONLY_ERROR = "read-only Hermes view: {type} is disabled (change things in Hermes, not in-game)"
 LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]", "::1")
@@ -79,6 +91,9 @@ class AdapterServer:
         poll_interval: float = 3.0,
         max_clients: int = 8,
         ping_interval: float = 15.0,
+        ops: OpsHub | None = None,
+        ops_tick: float = 1.0,
+        send_timeout: float = 10.0,
     ) -> None:
         self.read = read
         self.mapper = mapper
@@ -88,6 +103,7 @@ class AdapterServer:
         self.poll_interval = poll_interval
         self.max_clients = max_clients
         self.ping_interval = ping_interval
+        self.send_timeout = send_timeout
         self.model: dict[str, Any] | None = None
         self.clients: set[WSConnection] = set()
         self.hello: set[WSConnection] = set()
@@ -95,6 +111,14 @@ class AdapterServer:
         self._tasks: list[asyncio.Task[Any]] = []
         self.polls = 0
         self.last_error: str | None = None
+        # ops.* extension (docs/ops-protocol.md): None = no ops sources configured; clients that
+        # opt in still get an (empty) ops.snapshot so they can tell "no sources" from "old adapter"
+        self.ops = ops
+        self.ops_tick = max(0.05, float(ops_tick))
+        self.ops_model: dict[str, Any] | None = None
+        self.ops_clients: set[WSConnection] = set()
+        self.ops_ticks = 0
+        self.ops_error: str | None = None
 
     # ---- model ---------------------------------------------------------------------------
     async def refresh(self) -> list[dict[str, Any]]:
@@ -161,6 +185,25 @@ class AdapterServer:
             snap["goal"] = max(m["goals"], key=lambda g: (g["updatedAt"], g["id"]))
         return snap
 
+    def ops_snapshot(self) -> dict[str, Any]:
+        """``ops.snapshot`` for a client that opted in (empty lists when no ops source is set)."""
+        if self.ops is None:
+            return {
+                "type": "ops.snapshot", **{OPS_PLURAL[k]: [] for k in OPS_KINDS}, "sources": [],
+                "limits": {OPS_PLURAL[k]: n for k, n in OPS_MAX.items()}, "ts": now_ms(),
+            }
+        if self.ops_model is None:
+            self.ops_model = self.ops.model()
+        return self.ops.snapshot(self.ops_model)
+
+    @staticmethod
+    def requested_features(msg: dict[str, Any]) -> set[str]:
+        """Known features a hello asks for (unknown names and non-strings are ignored)."""
+        raw = msg.get("features")
+        if not isinstance(raw, list):
+            return set()
+        return {f for f in raw[:MAX_FEATURES] if isinstance(f, str) and f in FEATURES}
+
     # ---- wire ----------------------------------------------------------------------------
     @staticmethod
     def encode(msg: dict[str, Any]) -> str:
@@ -168,18 +211,40 @@ class AdapterServer:
 
     async def send(self, conn: WSConnection, msg: dict[str, Any]) -> None:
         try:
-            await conn.send_text(self.encode(msg))
+            await asyncio.wait_for(conn.send_text(self.encode(msg)), self.send_timeout)
+        except asyncio.TimeoutError:
+            # a client that stopped reading (frozen game, dead link) must not stall the broadcast
+            # loops for everyone else: drop it; a healthy client reconnects and gets a fresh snapshot
+            log.warning("client %s stopped reading (send blocked > %gs); dropping it", conn.request.peer, self.send_timeout)
+            self._abort(conn)
         except (WSClosed, ConnectionError, RuntimeError):
             self._drop(conn)
+
+    def _abort(self, conn: WSConnection) -> None:
+        conn.closed = True
+        try:
+            conn.writer.transport.abort()
+        except Exception:  # noqa: BLE001 - already gone
+            pass
+        self._drop(conn)
 
     async def broadcast(self, msgs: list[dict[str, Any]]) -> None:
         for msg in msgs:
             for conn in list(self.hello):
                 await self.send(conn, msg)
 
+    async def broadcast_ops(self, msgs: list[dict[str, Any]]) -> None:
+        """ops.* messages go only to connections that opted in with hello.features ["ops"]."""
+        targets = list(self.ops_clients)
+        for msg in msgs:
+            for conn in targets:
+                if conn in self.ops_clients:
+                    await self.send(conn, msg)
+
     def _drop(self, conn: WSConnection) -> None:
         self.clients.discard(conn)
         self.hello.discard(conn)
+        self.ops_clients.discard(conn)
 
     async def handle_message(self, conn: WSConnection, raw: str) -> None:
         if raw == "\x00binary":
@@ -196,10 +261,25 @@ class AdapterServer:
         mid = msg.get("id") if isinstance(msg.get("id"), str) else None
         if mtype == "hello":
             self.hello.add(conn)
-            log.info("hello from %s (%s %s)", conn.request.peer, str(msg.get("client", "client"))[:20], str(msg.get("modVersion", "?"))[:40])
+            features = self.requested_features(msg)
+            log.info("hello from %s (%s %s)%s", conn.request.peer, str(msg.get("client", "client"))[:20],
+                     str(msg.get("modVersion", "?"))[:40], f" features={sorted(features)}" if features else "")
+            # every hello re-decides the opt-in, so a reconnecting client never keeps a stale one
+            if OPS_FEATURE not in features:
+                self.ops_clients.discard(conn)
             await self.send(conn, self.snapshot())
+            if OPS_FEATURE in features:
+                # build the ops snapshot and join the broadcast set with no await in between: every
+                # later ops.* diff then starts from (at least) the model this snapshot shows, and the
+                # per-connection send lock keeps call order = wire order
+                ops_snap = self.ops_snapshot()
+                self.ops_clients.add(conn)
+                await self.send(conn, ops_snap)
             if mid:
-                await self.send(conn, {"type": "ack", "re": mid, "ok": True})
+                ack: dict[str, Any] = {"type": "ack", "re": mid, "ok": True}
+                if "features" in msg:  # only clients that asked learn what was granted
+                    ack["result"] = {"features": sorted(features)}
+                await self.send(conn, ack)
             return
         if conn not in self.hello:  # lenient like upstream: first message counts as hello
             self.hello.add(conn)
@@ -267,9 +347,41 @@ class AdapterServer:
             await asyncio.sleep(self.ping_interval)
             for conn in list(self.clients):
                 try:
-                    await conn.ping()
+                    await asyncio.wait_for(conn.ping(), self.send_timeout)
+                except asyncio.TimeoutError:
+                    log.warning("client %s stopped reading (ping blocked); dropping it", conn.request.peer)
+                    self._abort(conn)
                 except (WSClosed, ConnectionError, RuntimeError):
                     self._drop(conn)
+
+    async def refresh_ops(self) -> list[dict[str, Any]]:
+        """Run the ops sources that are due and return the ops.* diff (also applied to ops_model)."""
+        assert self.ops is not None
+        await self.ops.tick(wait=False)
+        self.ops_ticks += 1
+        new = self.ops.model()
+        msgs = OpsHub.changes(self.ops_model, new)
+        self.ops_model = new
+        return msgs
+
+    async def ops_loop(self) -> None:
+        """First collect right away (clients that connect earlier see sources in "starting")."""
+        while True:
+            try:
+                msgs = await self.refresh_ops()
+                self.ops_error = None
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:  # noqa: BLE001 - keep serving the last good ops model
+                why = f"{type(e).__name__}: {e}"
+                if why != self.ops_error:
+                    log.error("ops refresh failed: %s", why[:200])
+                self.ops_error = why
+                msgs = []
+            if msgs:
+                log.debug("broadcast %d ops message(s)", len(msgs))
+                await self.broadcast_ops(msgs)
+            await asyncio.sleep(self.ops_tick)
 
     async def start(self) -> int:
         await self.refresh()
@@ -277,7 +389,12 @@ class AdapterServer:
         sock = self._server.sockets[0].getsockname() if self._server.sockets else (self.host, self.port)
         self.port = sock[1]
         self._tasks = [asyncio.create_task(self.poll_loop()), asyncio.create_task(self.ping_loop())]
+        if self.ops is not None:
+            self.ops_model = self.ops.model()  # all sources "starting" until their first collect
+            self._tasks.append(asyncio.create_task(self.ops_loop()))
         log.info("listening on ws://%s:%d (hosts=%s peers=%s)", self.host, self.port, sorted(self.policy.allowed_hosts), [str(p) for p in self.policy.allowed_peers])
+        if self.ops is not None:
+            log.info("ops feed: %d source(s): %s", len(self.ops.slots), ", ".join(s.id for s in self.ops.slots))
         return self.port
 
     async def stop(self) -> None:
@@ -288,6 +405,8 @@ class AdapterServer:
         if self._server:
             self._server.close()
             await self._server.wait_closed()
+        if self.ops is not None:
+            self.ops.close()
 
 
 def now_ms() -> int:

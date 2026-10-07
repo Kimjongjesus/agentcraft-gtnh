@@ -11,18 +11,52 @@ Minecraft world, so losing a bit of detail is fine and leaking a token is not.
 2. Credential shapes (API keys, bearer tokens, JWTs, private keys, ``password=...``,
    ``--password X`` / ``--api-key 'X'`` flags, ``Authorization: <scheme> X``, ``sshpass -p X``,
    "the password is X", URLs with user:pass@, long hex/base64 blobs) become ``[redacted]``.
+   URLs that carry credentials lose them too: ``user:pass@`` and long ``token@`` user parts,
+   credential query parameters (``?token=``, ``&key=``, ``&sig=``, ``X-Amz-Signature=`` ...),
+   Discord/Slack webhook paths and opaque mixed-case path segments.
 3. Absolute paths are shortened to their last component (``.../file.py``) and paths to
    credential-looking files (``.env``, ``*.pem``, ``id_rsa``, ``auth.json`` ...) become ``[path]``.
-4. E-mail addresses become ``[email]``. Control characters are dropped, whitespace is collapsed
+4. IPv4 and IPv6 addresses become ``[ip]`` (ports and ``/prefix`` lengths are kept). On by default;
+   :func:`set_redact_ips` (adapter flag ``--allow-ip-text``) turns only this rule off.
+5. E-mail addresses become ``[email]``. Control characters are dropped, whitespace is collapsed
    unless ``keep_newlines`` is set, and the result is truncated to ``limit`` characters.
 """
 
 from __future__ import annotations
 
+import ipaddress
 import re
+from contextlib import contextmanager
+from typing import Iterator
 
 WITHHELD = "[withheld: mentions personal notes]"
 REDACTED = "[redacted]"
+IP = "[ip]"
+
+# Process-wide privacy setting: redact IP addresses in every string sent to a client. The adapter
+# sets it once at startup (--allow-ip-text); tests use the ip_policy() context manager.
+_REDACT_IPS = True
+
+
+def set_redact_ips(on: bool) -> None:
+    """Turn IP-address redaction on (default) or off for every later :func:`clean` call."""
+    global _REDACT_IPS
+    _REDACT_IPS = bool(on)
+
+
+def redact_ips_enabled() -> bool:
+    return _REDACT_IPS
+
+
+@contextmanager
+def ip_policy(on: bool) -> Iterator[None]:
+    """Temporarily set IP redaction (tests)."""
+    before = _REDACT_IPS
+    set_redact_ips(on)
+    try:
+        yield
+    finally:
+        set_redact_ips(before)
 
 _PERSONAL = re.compile(r"personal-[\w.*-]*\.md|personal-\*|memory/personal|personal_notes", re.I)
 
@@ -75,11 +109,73 @@ _SECRET_PATTERNS: list[re.Pattern[str]] = [
         r"(?P<k>\b(?i:pass(?:word|wd|phrase)|secret)s?\s+(?:(?i:is|was|for\s+\S+\s+is)\s+)?)"
         r"(?P<v>\"[^\"]*\"?|'[^']*'?|(?=[^\s,;]*[0-9A-Z_!@#$%^&*+=?~])[^\s,;]{4,})"
     ),
-    # credentials embedded in URLs
+    # credentials embedded in URLs: user:pass@ and a long bare token used as the user part
     re.compile(r"(?P<scheme>\b[a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@", re.I),
+    re.compile(r"(?P<scheme>\b[a-z][a-z0-9+.\-]*://)[^/\s:@]{16,}@", re.I),
+    # credential query parameters (?token=, &key=, &sig=, X-Amz-Signature=, ?code=, ...)
+    re.compile(
+        r"(?P<k>[?&;](?:[\w.\-]*(?:token|secret|signature|passw(?:or)?d|credential|api[_\-]?key|access[_\-]?key)"
+        r"[\w.\-]*|code|sig|sid|key|auth|jwt|ticket|session)=)(?P<v>[^&#\s]+)",
+        re.I,
+    ),
+    # webhook URLs are bearer capabilities: keep the host, drop the id/token path
+    re.compile(r"(?P<k>\bdiscord(?:app)?\.com/api(?:/v\d+)?/webhooks/)(?P<v>[^\s?#]+)", re.I),
+    re.compile(r"(?P<k>\bhooks\.slack\.com/(?:services|workflows|triggers)/)(?P<v>[^\s?#]+)", re.I),
     # long opaque hex blobs (>= 32)
     re.compile(r"\b[0-9a-fA-F]{32,}\b"),
 ]
+# URLs, for the opaque-path-segment rule (tokens in a path such as /bot123:AbC.../ or /t/<key>)
+_URL = re.compile(r"\b[a-z][a-z0-9+.\-]*://[^\s<>\"'`]+", re.I)
+_URL_SEGMENT = re.compile(r"[A-Za-z0-9_\-:]{24,}")
+
+
+def _url_repl(m: re.Match[str]) -> str:
+    def seg(s: re.Match[str]) -> str:
+        v = s.group(0)
+        if any(c.isupper() for c in v) and any(c.islower() for c in v) and any(c.isdigit() for c in v):
+            return REDACTED
+        return v
+
+    url = m.group(0)
+    head, sep, rest = url.partition("://")
+    host, slash, path = rest.partition("/")
+    return head + sep + host + slash + _URL_SEGMENT.sub(seg, path) if slash else url
+
+
+# IP addresses. Candidates are validated with the ipaddress module, so version strings with leading
+# zeros or octets > 255 (5.09.54.133, 10.13.4.1614), times (12:30:45) and MAC addresses survive.
+_IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?!\w|\.\d)")
+_IPV6_BRACKET = re.compile(r"\[([0-9A-Fa-f:.]+)(?:%[\w.\-]+)?\]")
+_IPV6_BARE = re.compile(
+    r"(?<![\w:.])((?:[0-9A-Fa-f]{0,4}:){2,7}(?:[0-9A-Fa-f]{1,4}|\d{1,3}(?:\.\d{1,3}){3})?)(?:%[\w.\-]+)?(?![\w:.])"
+)
+
+
+def _ipv6_repl(m: re.Match[str]) -> str:
+    cand = m.group(1)
+    # "::" or "a::" in prose (C++ scopes, Rust paths) is not an address; real ones carry a digit
+    if not any(c.isdigit() for c in cand):
+        return m.group(0)
+    try:
+        ipaddress.IPv6Address(cand)
+    except ValueError:
+        return m.group(0)
+    return IP
+
+
+def _ipv4_repl(m: re.Match[str]) -> str:
+    try:
+        ipaddress.IPv4Address(m.group(0))
+    except ValueError:
+        return m.group(0)
+    return IP
+
+
+def redact_ips(text: str) -> str:
+    """Replace every valid IPv4/IPv6 address in ``text`` with ``[ip]`` (ports and /len kept)."""
+    text = _IPV6_BRACKET.sub(_ipv6_repl, text)
+    text = _IPV6_BARE.sub(_ipv6_repl, text)
+    return _IPV4.sub(_ipv4_repl, text)
 # base64-ish blobs >= 32 chars; only redacted when they mix upper, lower and digits, so long
 # kebab-case slugs ("agentcraft-gtnh-port-card-1-...") survive
 _BLOB = re.compile(r"(?<![\w/.])[A-Za-z0-9+/_\-]{32,}={0,2}(?![\w/])")
@@ -140,12 +236,16 @@ def clean(text: object, limit: int = 200, keep_newlines: bool = False) -> str:
         return ""
     s = str(text)
     if mentions_personal(s):
-        return WITHHELD
+        # bounded like any other result (a 24-char field must not get the 35-char marker)
+        return WITHHELD if not limit or len(WITHHELD) <= limit else WITHHELD[: max(1, limit - 1)].rstrip() + "\u2026"
     s = _CTRL.sub("", s)
     for pat in _SECRET_PATTERNS:
         s = _sub_secret(pat, s)
+    s = _URL.sub(_url_repl, s)
     s = _BLOB.sub(_blob_repl, s)
     s = _PATH.sub(_shorten_path, s)
+    if _REDACT_IPS:
+        s = redact_ips(s)
     s = _EMAIL.sub("[email]", s)
     if keep_newlines:
         s = "\n".join(_WS.sub(" ", line).strip() for line in s.splitlines())
