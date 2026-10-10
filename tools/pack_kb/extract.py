@@ -141,9 +141,55 @@ def member_ref(cf, instruction):
     return cf.ref(int.from_bytes(instruction[2][:2], 'big'))
 
 
+def unambiguous_initializers(cf):
+    """Find sole putstatic sites in the class initializer.
+
+    Count every write in every method, including unsupported expressions and
+    control-flow suffixes. Recognizing one expression must never hide a later
+    reassignment. This is static evidence, not a claim of runtime immutability.
+    """
+    writes = Counter()
+    initializers = []
+    for method in cf.methods:
+        ops = list(instructions(method.code))
+        writes.update(member_ref(cf, ins) for ins in ops if ins[1] == 0xb3)
+        if method.name == '<clinit>':
+            initializers.append((method, ops))
+    if len(initializers) != 1:
+        return {}
+    method, ops = initializers[0]
+    if method.descriptor != '()V' or method.exceptions:
+        return {}
+    return {member_ref(cf, ins): ins[0] for ins in ops
+            if ins[1] == 0xb3
+            and writes[member_ref(cf, ins)] == 1}
+
+
+def unconditional_initializer(ops, start, end):
+    """No control-flow edge may skip, enter partway, or repeat an expression.
+
+    Unlike recipe chains, initializers may follow unrelated closed loops (the
+    pack initializes a bit-mask array before its voltage arrays). Such branches
+    must stay entirely before the expression or entirely after it. An exit to
+    its first instruction is safe; no normal return may precede it. We reason
+    only about successful class initialization, never execute the loop.
+    """
+    for pc, op, raw in ops:
+        if 0x99 <= op <= 0xa7 or op in (0xc6, 0xc7, 0xc8):
+            target = pc + int.from_bytes(raw, 'big', signed=True)
+            if not ((pc < start and target <= start) or (pc > end and target > end)):
+                return False
+        elif op in (0xa8, 0xa9, 0xaa, 0xab, 0xbf, 0xc4, 0xc9):
+            return False
+        elif 0xac <= op <= 0xb1 and pc <= end:
+            return False
+    return True
+
+
 def literal_arrays(cf):
     """Read literal array construction expressions, not arbitrary clinit code."""
     result = {}
+    assignments = unambiguous_initializers(cf)
     for method in cf.methods:
         if method.name != '<clinit>' or method.exceptions:
             continue
@@ -172,7 +218,8 @@ def literal_arrays(cf):
                 require(ops[j][1] == 0xb3, 'array assignment')
                 owner, name, desc = member_ref(cf, ops[j])
                 require(owner == cf.name and desc == descriptor, 'array field')
-                require(name not in result, 'repeated array assignment')
+                require(assignments.get((owner, name, desc)) == ops[j][0], 'ambiguous array assignment')
+                require(unconditional_initializer(ops, ops[i - 1][0], ops[j][0]), 'conditional array assignment')
                 result[name] = (values, offsets, ops[j][0])
             except (Unsupported, ClassError, IndexError):
                 continue
@@ -206,6 +253,7 @@ def voltage_map(cf, arrays):
     constants and operation order come from the class, not a tier formula table.
     """
     result = {}
+    assignments = unambiguous_initializers(cf)
     for method in cf.methods:
         if method.name != '<clinit>' or method.exceptions:
             continue
@@ -216,6 +264,8 @@ def voltage_map(cf, arrays):
                 require([op[1] for op in part] == [0xb2, 0xb8, 0xba, 0xb9, 0xb9, 0xb3], 'stream shape')
                 owner, array, desc = member_ref(cf, part[0])
                 require(owner == cf.name and array in arrays and desc == '[J', 'stream input')
+                require(assignments.get((owner, array, desc)) == arrays[array][2]
+                        and arrays[array][2] < part[0][0], 'stream input initialization order')
                 require(member_ref(cf, part[1]) == ('java/util/Arrays', 'stream', '([J)Ljava/util/stream/LongStream;'), 'stream call')
                 require(member_ref(cf, part[3]) == ('java/util/stream/LongStream', 'map', '(Ljava/util/function/LongUnaryOperator;)Ljava/util/stream/LongStream;'), 'stream map')
                 require(member_ref(cf, part[4]) == ('java/util/stream/LongStream', 'toArray', '()[J'), 'stream result')
@@ -259,6 +309,8 @@ def voltage_map(cf, arrays):
                     require(returned, 'lambda return absent')
                 owner, name, desc = member_ref(cf, part[5])
                 require(owner == cf.name and desc == '[J', 'stream assignment')
+                require(assignments.get((owner, name, desc)) == part[5][0], 'ambiguous stream assignment')
+                require(unconditional_initializer(ops, part[0][0], part[5][0]), 'conditional stream assignment')
                 result[name] = (values, part[5][0], target[1])
             except (Unsupported, ClassError, IndexError, ZeroDivisionError):
                 continue
@@ -305,13 +357,19 @@ class ChainVM:
             prefix, material, amount = args
             require(isinstance(prefix, tuple) and prefix[:2] == ('field', PREFIX), 'ore prefix')
             require(isinstance(material, tuple) and material[:2] == ('field', MATERIAL), 'material')
+            # The unificator rejects zero; copyAmount narrows and clamps to 64.
+            require(integer(amount, 1, 64), 'unificator amount outside identity range')
             return symbolic_stack('ore:' + prefix[2] + ':' + material[2], amount)
         if owner == ITEMLIST and name == 'get' and desc == '(J[Ljava/lang/Object;)' + ITEM:
             require(isinstance(receiver, tuple) and receiver[:2] == ('field', ITEMLIST), 'ItemList receiver')
             require(isinstance(args[1], Array) and args[1].values == [], 'ItemList fallback unsupported')
+            # copyAmount(J) uses l2i, then clamps/byte-narrows its int argument.
+            require(integer(args[0], 0, 64), 'ItemList amount outside identity range')
             return symbolic_stack('gt:ItemList:' + receiver[2], args[0])
         if owner == MATERIAL and name in ('getFluid', 'getGas', 'getMolten', 'getPlasma') and desc == '(J)' + FLUID:
             require(isinstance(receiver, tuple) and receiver[:2] == ('field', MATERIAL), 'fluid material')
+            # All four long getters use l2i before constructing FluidStack.
+            require(integer(args[0], 1, 2**31 - 1), 'fluid amount outside identity range')
             return symbolic_stack('gt:Materials:' + receiver[2] + ':' + name, args[0], 'mB')
         if (owner, name, desc) == ('gregtech/api/util/GTUtility', 'getIntegratedCircuit', '(I)' + ITEM):
             require(integer(args[0], 0, 24), 'circuit configuration')
@@ -331,7 +389,8 @@ class ChainVM:
             values[name] = [dict(x) for x in array.values]
         elif name in ('duration', 'eut'):
             require(desc in ('(I)' + BTYPE, '(J)' + BTYPE), 'numeric setter signature')
-            require(name not in values and integer(args[0]), 'numeric setter')
+            # Both long setters narrow to int; skip rather than emulate wrapping.
+            require(name not in values and integer(args[0], 0, 2**31 - 1), 'numeric setter')
             values[name] = args[0]
         elif name == 'circuit' and desc == '(I)' + BTYPE:
             require('circuit' not in values and integer(args[0], 0, 24), 'circuit setter')
@@ -512,6 +571,7 @@ class Extractor:
             return
         payload, tier_sid = self.read_member(jar, name, jarpath)
         cf = ClassFile(payload)
+        assignments = unambiguous_initializers(cf)
         for method in cf.methods:
             if method.name != '<clinit>' or method.exceptions:
                 continue
@@ -527,6 +587,8 @@ class Extractor:
                     require(integer(index, 0, len(values) - 1), 'tier index')
                     ref = member_ref(cf, part[3])
                     require(ref[0] == TIER and ref[2] == 'J', 'tier field')
+                    require(assignments.get(ref) == part[3][0], 'ambiguous tier assignment')
+                    require(unconditional_initializer(ops, part[0][0], part[3][0]), 'conditional tier assignment')
                     self.constants[ref] = (values[index], prov + [provenance(tier_sid, '<clinit>()V bytecode:' + str(part[3][0]) + ' field:' + ref[1])])
                     if ref[1].startswith('RECIPE_'):
                         for tier in self.data['tiers']:
@@ -536,6 +598,14 @@ class Extractor:
                                                           for p in tier['provenance'] + self.constants[ref][1]}.values())
                 except (Unsupported, ClassError, IndexError):
                     continue
+
+        # If a declared recipe-tier override is unresolved, the array fallback
+        # is not evidence for that tier's final value. Do not publish it.
+        unresolved = {field[len('RECIPE_'):] for field, desc in cf.fields.items()
+                      if field.startswith('RECIPE_') and (TIER, field, desc) not in self.constants}
+        if unresolved:
+            self.warn('Unresolved TierEU recipe fields; matching tier records skipped rather than using array fallbacks')
+        self.data['tiers'] = [tier for tier in self.data['tiers'] if tier['id'] not in unresolved]
 
     def language(self, payload, sid):
         by_index = {t['index']: t['id'] for t in self.data['tiers']}

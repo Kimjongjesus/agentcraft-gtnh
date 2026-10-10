@@ -77,6 +77,22 @@ Extraction currently uses POSIX file-descriptor guards and is tested on Linux.
   metadata requirements, loops, branches, NBT, helpers and other mods are not
   approximated. Multi-release Java variants are not selected.
 
+Static numeric calls are accepted only in identity-preserving ranges verified
+against the inspected API: ItemList amounts 0–64 (zero is a nonconsumed input),
+ore-unificator amounts 1–64, fluid amounts 1–2,147,483,647, and duration/EU setters
+0–2,147,483,647. Larger longs are skipped, not silently retained across Java
+narrowing or stack-size clamping. These restrictions apply to static bytecode,
+not to the normalized runtime-dump schema.
+
+Voltage arrays and TierEU constants require a unique static assignment and an
+unconditional expression. Reassignments (including unsupported later writes),
+branches crossing the expression, and mapping a source before initialization
+invalidate the affected facts and dependent constants. Unrelated closed loops
+before an initializer are permitted. An unresolved declared TierEU recipe field
+also removes the matching tier record rather than publishing its array fallback.
+This local bytecode analysis is not proof against reflection or external runtime
+mutation.
+
 The inspected test jar yielded useful static registrations, but no ready runtime
 recipe dump was found in the checked test-pack locations. `basis=static-bytecode`
 and `coverage.runtime_registry_complete=false` are intentional. A static

@@ -18,18 +18,34 @@ All changes are isolated to `tools/pack_kb/`:
 
 ## Parent verification
 
+The revised candidate addresses both independent review findings:
+
+- Static item quantities now reject unverified clamping/narrowing ranges;
+  ItemList accepts 0–64 and the ore-unificator accepts 1–64. All four material
+  fluid getters and duration/EU long setters are constrained to their supported
+  identity-preserving signed-int ranges rather than publishing an unconverted long.
+- Literal arrays, mapped voltage arrays and TierEU fields reject repeated or
+  control-flow-dependent assignments, including unmodelled later writes.
+  Dependencies cannot read a voltage array before initialization. An unresolved
+  matching TierEU recipe field removes its tier record, not just its constant.
+- Seventeen added synthetic test methods cover normal/boundary values, long
+  narrowing, ambiguous assignments and dependent records/recipes. Parent ran
+  them against the previous implementation: **67 failing cases, zero errors**,
+  establishing regression sensitivity. All pass on the revision.
+
 Commands run from the repository root:
 
 ```sh
 python3 -m tools.pack_kb.sample.generate
 python3 -m unittest discover -s tools/pack_kb/tests -v
 python3 -m tools.pack_kb.extract --pack-root tools/pack_kb/private/pack --pack-version 'GTNH 2.9 beta 3' --output tools/pack_kb/private/store.json
+python3 -m tools.pack_kb.private.verify_revision
 python3 -m tools.pack_kb.private.verify_parent
 git diff --check
 git check-ignore tools/pack_kb/private/store.json tools/pack_kb/private/pack/mods/gregtech-5.09.54.133.jar tools/pack_kb/private/tests.txt
 ```
 
-Observed: **63 tests passed**. Real copied-jar extraction: **203 static recipes,
+Observed on the revision: **80 tests passed**. Real copied-jar extraction: **203 static recipes,
 846 machine-language records, 16 tiers, 27 machine-config facts, 66 sources**.
 The compact private store is **488,955 bytes**. Every source/member hash matched;
 re-extraction was deterministic; local input hashes were unchanged. Parent CLI
@@ -39,7 +55,14 @@ alternatives. A real static chain returns quantities and a bottleneck while
 correctly reporting unresolved symbolic prerequisites. Parent also inspected the
 recipe's actual bytecode registration and TierEU voltage assignment.
 
-Private evidence (not committed): `private/tests.txt`, `private/evidence.txt`,
+The revision's regenerated store is exactly equal to the previous private store:
+no actual records added, changed or removed. The accepted-input defects were
+synthetically reproduced; they did not occur in those extracted records. Parent
+also inspected the copied API bytecode for stack clamping and long-to-int
+conversion, without executing pack classes or accessing any remote host.
+
+Revision evidence (not committed): `private/revision-tests.txt`,
+`private/revision-evidence.txt`, `private/verify_revision.py`,
 `private/query-*.json`, `private/assembler-bytecode.txt`, `private/store.json`.
 The parent verification script itself is private because it targets the local
 copied inputs. The public unittest suite is independently runnable without them.
@@ -68,9 +91,10 @@ copied inputs. The public unittest suite is independently runnable without them.
 - The requested project-specific skill was unavailable through the skill loader
   and searched skill locations. Roadmap/protocol and the golden workflow were
   read instead; no missing instructions were invented.
-- Both required timing-marker invocations were attempted. The helper rejected
-  the terminal context as delegated; no guard was bypassed. Early subagent
-  ad-hoc checks preceded the attempted marker and are not the final evidence.
+- Both required timing-marker invocations were attempted in the revision run.
+  The test marker was attempted before any tests. The helper could not bind
+  this terminal to the current live builder run; no guard was bypassed. They
+  are timing markers only, not permission grants or test-pass evidence.
 
 ## Decisions needed
 
