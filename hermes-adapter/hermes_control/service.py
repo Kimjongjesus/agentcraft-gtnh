@@ -156,6 +156,7 @@ class ControlService:
         self._tasks: list[asyncio.Task[Any]] = []
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="control-exec")
         self._out_seq = 0
+        self._boot = secrets.token_hex(3)  # outgoing ids are unique per process start: c<boot>.<n>
         self.bad_frame_limit = BAD_FRAMES_BEFORE_CLOSE
 
     # ---- small helpers ------------------------------------------------------------------------
@@ -180,7 +181,7 @@ class ControlService:
             return False
         self._out_seq += 1
         conn.seq += 1
-        body = {"type": type_, "session": conn.session, "dir": "c2g", "id": f"c{self._out_seq}", "nonce": secrets.token_hex(16), "ts": self.now(), **fields}
+        body = {"type": type_, "session": conn.session, "dir": "c2g", "id": f"c{self._boot}.{self._out_seq}", "nonce": secrets.token_hex(16), "ts": self.now(), **fields}
         try:
             frames.check_payload(body, type_)
         except frames.FrameError as e:  # a bug on our side must never put a malformed frame on the wire

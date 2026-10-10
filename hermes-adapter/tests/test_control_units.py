@@ -4,6 +4,7 @@ and the read adapter still refusing every action.* message."""
 from __future__ import annotations
 
 import io
+import asyncio
 import json
 import os
 import stat
@@ -143,6 +144,8 @@ class PolicyTest(unittest.TestCase):
 
     def test_example_contains_placeholders_only(self):
         text = (PKG / "policy.example.json").read_text() + (PKG / "fixtures" / "board.example.json").read_text() + (PKG / "policy.empty.json").read_text()
+        text += (PKG.parent / "CONTROL.md").read_text() + (PKG.parent / "systemd" / "hermes-agentcraft-control.service").read_text()
+        text += (PKG.parent / "scripts" / "control_client.py").read_text()
         import re
 
         self.assertNotRegex(text, r"\b(?:10|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d+\.\d+")
@@ -701,7 +704,16 @@ class ReadAdapterStillReadOnlyTest(unittest.TestCase):
                             break
                 c.close()
             finally:
-                st.stop()
+                fut = asyncio.run_coroutine_threadsafe(srv.stop(), st.loop)
+                fut.result(5)
+                async def _drain():
+                    await asyncio.gather(*srv._tasks, return_exceptions=True)  # let the cancelled poll tasks finish
+
+                asyncio.run_coroutine_threadsafe(_drain(), st.loop).result(5)
+                st.loop.call_soon_threadsafe(st.loop.stop)
+                st.thread.join(5)
+                if not st.thread.is_alive():
+                    st.loop.close()
 
     def test_control_code_is_not_imported_by_the_read_adapter(self):
         root = Path(__file__).resolve().parent.parent / "hermes_adapter"
