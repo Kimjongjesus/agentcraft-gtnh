@@ -13,6 +13,7 @@ import org.lwjgl.input.Keyboard;
 import dev.agentcraft.gtnh.api.Extensions;
 import dev.agentcraft.gtnh.ops.DecisionData;
 import dev.agentcraft.gtnh.state.HqData;
+import dev.agentcraft.gtnh.ui.Theme;
 import dev.agentcraft.gtnh.ui.UiFont;
 import dev.agentcraft.gtnh.ui.Widgets;
 
@@ -87,9 +88,14 @@ public final class WriteFooter implements Extensions.ClientHooks {
         float cy = y0 + 2 * (ROW + 3) + 1;
         UiFont reg = UiFont.regular();
         String res = WUi.recentResultLine();
-        boolean both = res != null && !lay.hint.isEmpty();
+        // while writes cannot happen the sentence says why (the pills have no room for it in a narrow footer)
+        boolean off = !ClientWriteState.canWrite();
+        String left = off ? WUi.stateText() : lay.hint;
+        int leftColor = off ? Theme.readable(ClientWriteState.locked ? WUi.RED : WUi.ORANGE, WUi.TH.bg) : WUi.TH.muted;
+        boolean both = res != null && !left.isEmpty();
         float half = both ? (x1 - x0) * 0.56F : (x1 - x0);
-        if (!lay.hint.isEmpty()) reg.drawFit(lay.hint, x0 + 1, cy, Widgets.SMALL + 0.4F, half - 4, 0xFF000000 | WUi.TH.muted);
+        if (!left.isEmpty()) reg.drawFit(left, x0 + 1, cy, Widgets.SMALL + 0.4F, half - 4, 0xFF000000 | leftColor);
+        if (off && Widgets.inside(mx, my, x0, cy, x0 + half, cy + 9)) WUi.tip(left, mx, my);
         if (res != null) {
             float rx = both ? x0 + half : x0 + 1;
             reg.drawFit(res, rx, cy, Widgets.SMALL + 0.4F, x1 - rx, 0xFF000000 | WUi.resultColor(ClientWriteState.lastResult()));
