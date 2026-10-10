@@ -1,0 +1,3 @@
+# Private pack inputs, full stores and verification evidence never ship.
+/private/
+__pycache__/

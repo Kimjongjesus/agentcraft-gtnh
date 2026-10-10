@@ -1,0 +1,661 @@
+{
+  "schema_version": 1,
+  "pack_version": "synthetic",
+  "sources": [
+    {
+      "id": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+      "path": "recipes.json",
+      "sha256": "3b665eb080d37a298bf29b617ce224355e7a86c2826129572d1241e817d0df74"
+    }
+  ],
+  "tiers": [
+    {
+      "id": "sample:T0",
+      "index": 0,
+      "voltage": 11,
+      "recipe_eut": 7,
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/synthetic_metadata/tiers/0"
+        }
+      ]
+    },
+    {
+      "id": "sample:T1",
+      "index": 1,
+      "voltage": 43,
+      "recipe_eut": 29,
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/synthetic_metadata/tiers/1"
+        }
+      ]
+    }
+  ],
+  "machines": [
+    {
+      "id": "sample:press",
+      "name": "Fictional Press",
+      "tier": "sample:T0",
+      "family": "sample:press",
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/synthetic_metadata/machines/0"
+        }
+      ]
+    },
+    {
+      "id": "sample:assembler",
+      "name": "Fictional Assembler",
+      "tier": "sample:T1",
+      "family": "sample:assembly",
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/synthetic_metadata/machines/1"
+        }
+      ]
+    },
+    {
+      "id": "sample:bench",
+      "name": "Fictional Bench",
+      "tier": null,
+      "family": "sample:manual",
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/synthetic_metadata/machines/2"
+        }
+      ]
+    }
+  ],
+  "recipes": [
+    {
+      "id": "sample:plate_press",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:ore",
+          "amount": 3,
+          "unit": "item"
+        },
+        {
+          "item": "sample:die",
+          "amount": 2,
+          "unit": "item",
+          "consumed": false
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:plate",
+          "amount": 2,
+          "unit": "item"
+        },
+        {
+          "item": "sample:scrap",
+          "amount": 1,
+          "unit": "item",
+          "chance": 0.25
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/0"
+        }
+      ]
+    },
+    {
+      "id": "sample:plate_cast",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:powder",
+          "amount": 4,
+          "unit": "item"
+        },
+        {
+          "item": "sample:water",
+          "amount": 250,
+          "unit": "mB"
+        },
+        {
+          "item": "sample:die",
+          "amount": 1,
+          "unit": "item",
+          "consumed": false
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:plate",
+          "amount": 3,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/1"
+        }
+      ]
+    },
+    {
+      "id": "sample:wire_draw",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:copper",
+          "amount": 2,
+          "unit": "item"
+        },
+        {
+          "item": "sample:die",
+          "amount": 3,
+          "unit": "item",
+          "consumed": false
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:wire",
+          "amount": 3,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/2"
+        }
+      ]
+    },
+    {
+      "id": "sample:wire_spin",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:fiber",
+          "amount": 4,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:wire",
+          "amount": 2,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/3"
+        }
+      ]
+    },
+    {
+      "id": "sample:widget_assemble",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:plate",
+          "amount": 3,
+          "unit": "item"
+        },
+        {
+          "item": "sample:wire",
+          "amount": 2,
+          "unit": "item"
+        },
+        {
+          "item": "sample:water",
+          "amount": 100,
+          "unit": "mB"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:widget",
+          "amount": 2,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/4"
+        }
+      ]
+    },
+    {
+      "id": "sample:water_condense",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:ice",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:water",
+          "amount": 1000,
+          "unit": "mB"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/5"
+        }
+      ]
+    },
+    {
+      "id": "sample:water_token",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:token",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:water",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/6"
+        }
+      ]
+    },
+    {
+      "id": "sample:lottery",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:gravel",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:gem",
+          "amount": 1,
+          "unit": "item",
+          "chance": 0.1
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/7"
+        }
+      ]
+    },
+    {
+      "id": "sample:gem_cut",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:crystal",
+          "amount": 2,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:gem",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/8"
+        }
+      ]
+    },
+    {
+      "id": "sample:cycle_a",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:cycle_b",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:cycle_a",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/9"
+        }
+      ]
+    },
+    {
+      "id": "sample:cycle_b",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:cycle_a",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:cycle_b",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/10"
+        }
+      ]
+    },
+    {
+      "id": "sample:blocked",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:ore",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:blocked",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": false,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/11"
+        }
+      ]
+    },
+    {
+      "id": "sample:symbolic",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "ore:synthetic:Imaginary",
+          "amount": 2,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:symbolic",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/12"
+        }
+      ]
+    },
+    {
+      "id": "sample:chance_input",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:dust",
+          "amount": 2,
+          "unit": "item",
+          "chance": 0.5
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:uncertain",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/13"
+        }
+      ]
+    },
+    {
+      "id": "sample:tool_build",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:stone",
+          "amount": 3,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:tool",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/14"
+        }
+      ]
+    },
+    {
+      "id": "sample:tool_use",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:tool",
+          "amount": 1,
+          "unit": "item",
+          "consumed": false
+        },
+        {
+          "item": "sample:ore",
+          "amount": 2,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:tool_product",
+          "amount": 1,
+          "unit": "item"
+        }
+      ],
+      "duration_ticks": null,
+      "eut": null,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/15"
+        }
+      ]
+    },
+    {
+      "id": "sample:mixed_output",
+      "machine": "sample:workbench",
+      "inputs": [
+        {
+          "item": "sample:ore",
+          "amount": 3,
+          "unit": "item"
+        }
+      ],
+      "outputs": [
+        {
+          "item": "sample:mixed",
+          "amount": 2,
+          "unit": "item"
+        },
+        {
+          "item": "sample:mixed",
+          "amount": 10,
+          "unit": "item",
+          "chance": 0.2
+        }
+      ],
+      "duration_ticks": 20,
+      "eut": 7,
+      "enabled": true,
+      "basis": "runtime-dump",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/recipes/16"
+        }
+      ]
+    }
+  ],
+  "facts": [
+    {
+      "id": "sample:notice",
+      "category": "sample:synthetic",
+      "value": "Original fictional data; no actual pack recipes or voltage claims.",
+      "provenance": [
+        {
+          "source": "source:608b4539d27a5fdfa40c43da727f5d2d742177ec8017c86a1d6b9f1fa93cc78f",
+          "locator": "/synthetic_metadata/facts/0"
+        }
+      ]
+    }
+  ],
+  "coverage": {
+    "runtime_dump": true,
+    "runtime_registry_complete": false,
+    "static_registration_coverage": "partial",
+    "warnings": [
+      "No gregtech jar found under mods/",
+      "config/GregTech/MachineStats.cfg absent"
+    ],
+    "static_skips": {},
+    "limitations": [
+      "No Java or pack classes are executed. Static registrations are not proof of the final runtime recipe set.",
+      "Only self-contained simple builder chains in control-flow-free prefixes of base gregtech/loaders/postload/recipes run() methods are interpreted; helper methods, branches, loops, metadata, NBT and other loaders are not expanded.",
+      "enabled=true on a static recipe means an unconditional registration expression, not runtime availability; loader invocation and recipe-map transformations are not verified.",
+      "Symbolic IDs preserve OrePrefixes/Materials, ItemList fields and fluid getter identity, not resolved registry aliases. Circuit identities include configuration and are nonconsumed.",
+      "Machine families and tiers are language-key metadata, not verified metatile registrations.",
+      "Base jar members are read; multi-release variants are not selected as a runtime JVM would."
+    ],
+    "static_builder_candidates": 0,
+    "static_loader_classes": 0,
+    "runtime_dump_files": 1,
+    "runtime_dump_recipes": 17,
+    "static_builder_candidates_scope": "Recognized sites in control-flow-free run() prefixes only; not a denominator for whole-pack coverage",
+    "symbolic_ids": {
+      "ore:<prefix>:<material>": "OrePrefixes and Materials static field names; not a canonical registry ID",
+      "gt:ItemList:<field>": "ItemList static field name; aliases are not resolved",
+      "gt:Materials:<material>:<getter>": "Materials fluid getter identity; getFluid/getGas/getMolten/getPlasma stay distinct",
+      "gt:integrated_circuit:<configuration>": "Zero-size integrated circuit, represented as one nonconsumed item"
+    },
+    "static_recipes": 0,
+    "counts": {
+      "sources": 1,
+      "tiers": 2,
+      "machines": 3,
+      "recipes": 17,
+      "facts": 1
+    },
+    "synthetic": true,
+    "description": "Original fictional examples, not GTNH pack recipes, machine registrations, or voltage values."
+  }
+}
