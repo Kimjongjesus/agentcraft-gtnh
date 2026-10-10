@@ -139,6 +139,22 @@ public final class ControlLink implements Controller.Uplink {
         return id;
     }
 
+    /** The write link's transport: one message is at most the wire limit (16384 bytes), text only, checked before any allocation. */
+    public static WebSocketClient newClient() {
+        return new WebSocketClient(Frames.MAX_BYTES, true);
+    }
+
+    /**
+     * Atomic invalidation (game lock, security disarm): the connection is marked dead first (the writer
+     * never dequeues or sends after that), the outbox is emptied, the socket is closed. A frame that is
+     * already being written to the socket is on the wire; nothing queued behind it ever is.
+     */
+    @Override
+    public void invalidate() {
+        Conn c = conn;
+        if (c != null) kill(c);
+    }
+
     private void kill(Conn c) {
         c.dead = true;
         c.ready = false;
@@ -154,7 +170,7 @@ public final class ControlLink implements Controller.Uplink {
             String why = "closed";
             try {
                 note = "connecting to " + url;
-                WebSocketClient ws = new WebSocketClient();
+                WebSocketClient ws = newClient();
                 c = new Conn(ws);
                 ws.connect(new URI(url), 5000);
                 rx.resetSession();
@@ -252,7 +268,7 @@ public final class ControlLink implements Controller.Uplink {
         try {
             while (!c.dead) {
                 String f = c.outbox.poll(1, TimeUnit.SECONDS);
-                if (f != null && !c.dead) c.ws.sendText(f);
+                if (f != null && !c.dead) c.ws.sendText(f); // dead is set before the outbox is cleared: a late poll result is dropped here
             }
         } catch (IOException | InterruptedException | RuntimeException e) {
             kill(c);

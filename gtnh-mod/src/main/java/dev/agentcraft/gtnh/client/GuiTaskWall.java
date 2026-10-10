@@ -120,7 +120,6 @@ public class GuiTaskWall extends GuiScreen {
         float tw = heavy.draw("Task wall", pad, pad, Widgets.H1, 0xFF000000 | th.text);
         dev.agentcraft.gtnh.api.Extensions.ClientHooks hooks = dev.agentcraft.gtnh.api.Extensions.client;
         String hookNote = hooks == null ? null : hooks.statusLine("taskwall");
-        reg.draw(BoardView.scopeLabel(binding) + "  \u00b7  " + (hookNote != null ? hookNote : "read-only"), pad + tw + 8, pad + 3, Widgets.BODY, 0xFF000000 | th.muted);
         float right = width - pad;
         if (!ClientAgentCache.linkUp) {
             right -= Ui.pillRight(reg, "adapter offline \u00b7 last data", right, pad + 1, Widgets.SMALL, th.danger) + 4;
@@ -128,7 +127,10 @@ public class GuiTaskWall extends GuiScreen {
             right -= Ui.pillRight(bold, v.goal.openDecisions + " need you", right, pad + 1, Widgets.SMALL + 0.6F, th.accent) + 4;
         }
         String sum = v.openCount() + " open  \u00b7  " + v.doneAllTime() + " / " + v.goal.total + " done all time (" + Math.round(v.goal.progress * 100) + "%)";
-        reg.drawRight(sum, right, pad + 3, Widgets.SMALL + 0.4F, 0xFF000000 | th.muted);
+        float sumW = reg.drawRight(sum, right, pad + 3, Widgets.SMALL + 0.4F, 0xFF000000 | th.muted);
+        // the left text (scope + the add-on's status) gets only the room the stats on the right leave free
+        float leftX = pad + tw + 8;
+        reg.drawFit(BoardView.scopeLabel(binding) + "  \u00b7  " + (hookNote != null ? hookNote : "read-only"), leftX, pad + 3, Widgets.BODY, right - sumW - 10 - leftX, 0xFF000000 | th.muted);
         tabs.draw(th, mx, my);
 
         // ---- list --------------------------------------------------------------------------

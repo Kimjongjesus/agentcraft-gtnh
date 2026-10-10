@@ -78,9 +78,12 @@ public class GuiDecisions extends GuiScreen {
         float tw = heavy.draw("Waiting on you", pad, pad, Widgets.H1, 0xFF000000 | th.text);
         dev.agentcraft.gtnh.api.Extensions.ClientHooks hooks = dev.agentcraft.gtnh.api.Extensions.client;
         String hookNote = hooks == null ? null : hooks.statusLine("decisions");
-        reg.draw(ds.size() + (ds.size() == 1 ? " open decision" : " open decisions") + "  \u00b7  " + (hookNote != null ? hookNote : "read-only: answer outside the game for now"), pad + tw + 8, pad + 3,
-            Widgets.BODY, 0xFF000000 | th.muted);
-        if (!ClientOps.decisionsLive) Ui.pillRight(reg, "adapter offline", width - pad, pad + 1, Widgets.SMALL, th.danger);
+        float right = width - pad;
+        if (!ClientOps.decisionsLive) right -= Ui.pillRight(reg, "adapter offline", right, pad + 1, Widgets.SMALL, th.danger) + 4;
+        float leftX = pad + tw + 8;
+        // only the room left of the right-hand pill: a long status is cut with an ellipsis, never drawn over it
+        reg.drawFit(ds.size() + (ds.size() == 1 ? " open decision" : " open decisions") + "  \u00b7  " + (hookNote != null ? hookNote : "read-only: answer outside the game for now"), leftX, pad + 3,
+            Widgets.BODY, right - 6 - leftX, 0xFF000000 | th.muted);
         reg.draw(hookNote != null ? "Esc closes." : "Answering from the game comes in a later card. Esc closes.", pad, height - pad - reg.lineHeight(Widgets.SMALL), Widgets.SMALL,
             0xFF000000 | th.muted);
         DecisionData.Decision sel = null;

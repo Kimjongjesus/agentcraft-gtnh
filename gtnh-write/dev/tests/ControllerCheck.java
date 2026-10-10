@@ -43,6 +43,10 @@ public class ControllerCheck {
         Check.Facts facts = new Check.Facts();
         Controller c;
         boolean ready = true;
+        /** queued mode: frames wait in {@link #queue} until {@link #flush} (the real link's outbox); {@link #sent} is the wire */
+        boolean queued, closeOnInvalidate;
+        List<Sent> queue = new ArrayList<>();
+        int invalidations;
         int ids;
         List<Sent> sent = new ArrayList<>();
         List<String> closed = new ArrayList<>(), prompts = new ArrayList<>(), results = new ArrayList<>(), chats = new ArrayList<>();
@@ -117,8 +121,21 @@ public class ControllerCheck {
         public String send(String type, Map<String, Object> body) {
             if (!ready) return null;
             String id = "w-" + (++ids);
-            sent.add(new Sent(type, id, body));
+            (queued ? queue : sent).add(new Sent(type, id, body));
             return id;
+        }
+
+        @Override
+        public void invalidate() {
+            invalidations++;
+            queue.clear();
+            if (closeOnInvalidate) ready = false;
+        }
+
+        /** The writer thread catching up: everything still queued goes on the wire. */
+        void flush() {
+            sent.addAll(queue);
+            queue.clear();
         }
 
         @Override
@@ -237,6 +254,8 @@ public class ControllerCheck {
         linkAndResults();
         override();
         auditRules();
+        uplinkInvalidation();
+        tokenLifecycle();
         Check.summary("ControllerCheck");
     }
 
@@ -475,7 +494,7 @@ public class ControllerCheck {
         n.wait2s();
         n.c.handleCancel(OWNER, TOK2);
         Check.ok(!n.c.promptOpen(TOK2), "the owner cancels");
-        Check.eq(n.count("action.cancel"), 1, "action.cancel sent");
+        Check.eq(n.count("action.cancel"), 2, "action.cancel sent for the replaced prompt (F8) and for the owner's cancel");
         n.wait2s();
         n.c.handleConfirm(OWNER, TOK2);
         Check.eq(n.count("action.confirm"), 0, "no confirm after cancel");
@@ -739,5 +758,150 @@ public class ControllerCheck {
         s.facts.wlOn = false;
         s.c.recheck();
         Check.ok(s.c.stateJson().contains("whitelist-enforced"), "client state json carries the disarm reason");
+    }
+
+    // ---- F4: lock and disarm invalidate the uplink -------------------------------------------------------------
+
+    static void uplinkInvalidation() throws Exception {
+        // a queued request, then the game lock: nothing queued before the lock reaches the wire after it
+        Rig r = new Rig();
+        r.sent.clear();
+        r.queued = true;
+        r.wait2s();
+        r.c.handleRequest(OWNER, "agent.ask", "{\"agent\":\"helper-a\",\"text\":\"queued before the lock\"}");
+        Check.eq(r.queue.size(), 1, "F4: the request waits in the outbox, not yet on the wire");
+        Check.eq(r.sent.size(), 0, "F4: ... the wire is empty");
+        r.c.lockBy(new Controller.Principal(OWNER), "panic");
+        Check.ok(r.invalidations >= 1, "F4: the lock invalidates the uplink");
+        r.flush(); // the writer thread catches up
+        Check.eq(r.count("action.request"), 0, "F4: the request queued before the lock never reaches the wire");
+        Check.eq(r.sent.size(), 1, "F4: only the lock notice is on the wire");
+        Check.eq(r.sent.get(0).type, "action.lock", "F4: ... and it is action.lock");
+
+        // a queued CONFIRM, then the lock
+        Rig q = new Rig();
+        q.dispatch("c1", TOK1);
+        q.sent.clear();
+        q.queued = true;
+        q.wait2s();
+        q.c.handleConfirm(OWNER, TOK1);
+        Check.eq(q.queue.size(), 1, "F4: the confirm waits in the outbox");
+        q.c.lockBy(new Controller.Principal(null), "console panic");
+        q.flush();
+        Check.eq(q.count("action.confirm"), 0, "F4: the confirm queued before the lock never reaches the wire");
+        Check.eq(q.sent.size(), 1, "F4: only the lock notice is on the wire (confirm case)");
+
+        // the real link closes on invalidate (not ready afterwards) and announces the lock when it is back up
+        Rig k = new Rig();
+        k.sent.clear();
+        k.queued = true;
+        k.closeOnInvalidate = true;
+        k.wait2s();
+        k.c.handleRequest(OWNER, "agent.ask", "{\"agent\":\"helper-a\",\"text\":\"x\"}");
+        k.c.lockBy(new Controller.Principal(OWNER), "closing link");
+        k.flush();
+        Check.eq(k.sent.size(), 0, "F4: closing link: nothing at all reaches the wire after the lock");
+        k.ready = true;
+        k.queued = false;
+        k.c.onLinkUp(Rig.policy(), Rig.state());
+        Check.eq(k.sent.size(), 1, "F4: ... the reconnect announces the lock");
+        Check.eq(k.last().type, "action.lock", "F4: ... as action.lock");
+
+        // a security disarm does the same
+        Rig d = new Rig();
+        d.sent.clear();
+        d.queued = true;
+        d.wait2s();
+        d.c.handleRequest(OWNER, "agent.ask", "{\"agent\":\"helper-a\",\"text\":\"queued before the disarm\"}");
+        int inv = d.invalidations;
+        d.facts.online = false;
+        d.c.recheck();
+        Check.ok(!d.c.armed(), "F4: disarmed");
+        Check.ok(d.invalidations > inv, "F4: the security disarm invalidates the uplink");
+        d.flush();
+        Check.eq(d.sent.size(), 0, "F4: nothing queued before the disarm reaches the wire");
+        // a second recheck while still disarmed does not bounce the link again
+        int inv2 = d.invalidations;
+        d.c.recheck();
+        d.c.recheck();
+        Check.eq(d.invalidations, inv2, "F4: staying disarmed does not close the link again");
+    }
+
+    // ---- F8: token lifecycle -------------------------------------------------------------------------------------
+
+    static void tokenLifecycle() throws Exception {
+        // lock voids a prompted request at once: cancelled, audited, not "unknown" after 90 s
+        Rig r = new Rig();
+        String id = r.dispatch("c1", TOK1);
+        r.results.clear();
+        r.c.lockBy(new Controller.Principal(OWNER), "panic");
+        Check.eq(r.c.pendingRequests(), 0, "F8: lock resolves the prompted request (nothing left pending)");
+        Check.eq(r.results.size(), 1, "F8: exactly one result for the voided request");
+        Check.eq(r.results.get(0), Check.OWNER + "|card.dispatch|cancelled|locked|false", "F8: resolved as cancelled: locked");
+        Check.ok(r.auditText().contains("result") && r.auditText().contains("cancelled: locked"), "F8: audit line 'cancelled: locked'");
+        r.clock.t += 120_000;
+        r.c.tick();
+        boolean unknown = false;
+        for (String x : r.results) if (x.contains("|unknown|")) unknown = true;
+        Check.ok(!unknown, "F8: no 'unknown' result 90 s later");
+        Check.ok(id != null, "F8: the request existed");
+
+        // disarm: same, 'cancelled: disarmed'
+        Rig d = new Rig();
+        d.dispatch("c1", TOK1);
+        d.results.clear();
+        d.facts.online = false;
+        d.c.recheck();
+        Check.eq(d.c.pendingRequests(), 0, "F8: disarm resolves the prompted request");
+        Check.ok(d.results.size() == 1 && d.results.get(0).contains("|cancelled|disarmed: "), "F8: resolved as cancelled: disarmed (" + d.results + ")");
+        Check.ok(d.auditText().contains("cancelled: disarmed"), "F8: audit line 'cancelled: disarmed'");
+        Check.ok(d.invalidations >= 1, "F8: security disarm invalidates the uplink (closes it, so the control service voids all tokens)");
+
+        // a link that goes down still answers 'unknown' (we do not know what the control service did)
+        Rig l = new Rig();
+        l.dispatch("c1", TOK1);
+        l.results.clear();
+        l.c.onLinkDown("test");
+        Check.ok(l.results.size() == 1 && l.results.get(0).contains("|unknown|"), "F8: link down: still 'unknown' (" + l.results + ")");
+
+        // policy revision change closes the local prompts; the same revision does not
+        Rig p = new Rig();
+        p.dispatch("c1", TOK1);
+        Msg.Policy same = Rig.policy();
+        same.type = "action.policy";
+        p.c.onFrame(same);
+        Check.ok(p.c.promptOpen(TOK1), "F8: a policy frame with the same revision keeps the prompt");
+        p.results.clear();
+        Msg.Policy newer = Rig.policy();
+        newer.type = "action.policy";
+        newer.revision = "r2";
+        p.c.onFrame(newer);
+        Check.ok(!p.c.promptOpen(TOK1) && p.c.openPrompts() == 0, "F8: a new policy revision closes the Confirm prompt");
+        Check.ok(p.closed.get(p.closed.size() - 1).startsWith(TOK1), "F8: ... and tells the screen to close");
+        Check.ok(p.results.size() == 1 && p.results.get(0).contains("|cancelled|policy revision changed"), "F8: ... and resolves the request as cancelled (" + p.results + ")");
+        p.wait2s();
+        p.c.handleConfirm(OWNER, TOK1);
+        Check.eq(p.count("action.confirm"), 0, "F8: the closed token cannot be confirmed");
+
+        // cancel does not depend on the request bucket
+        Rig b = new Rig();
+        b.dispatch("c1", TOK1);
+        for (int i = 0; i < 6; i++) b.c.handleRequest(OWNER, "agent.ask", "{\"agent\":\"helper-a\",\"text\":\"spam\"}");
+        Check.ok(b.lastResult().contains("slow down"), "F8: the request bucket is empty (" + b.lastResult() + ")");
+        b.c.handleCancel(OWNER, TOK1);
+        Check.eq(b.count("action.cancel"), 1, "F8: cancel still goes to the control service with an empty bucket");
+        Check.eq(b.last().body.get("token"), TOK1, "F8: ... carrying the token");
+
+        // a replaced prompt and a departing player are cancelled upstream too
+        Rig m = new Rig();
+        m.dispatch("c1", TOK1);
+        m.dispatch("c2", TOK2); // same player: replaces the first
+        Check.eq(m.count("action.cancel"), 1, "F8: the replaced prompt is cancelled upstream");
+        Check.eq(m.last().body.get("token"), TOK1, "F8: ... the old token");
+        Check.ok(m.c.promptOpen(TOK2) && !m.c.promptOpen(TOK1), "F8: only the newer prompt stays");
+        m.c.playerLeft(Check.OWNER);
+        Check.eq(m.count("action.cancel"), 2, "F8: a departing player's prompt is cancelled upstream");
+        Check.eq(m.last().body.get("token"), TOK2, "F8: ... the open token");
+        Check.eq(m.c.pendingRequests(), 0, "F8: ... and its request is resolved");
     }
 }

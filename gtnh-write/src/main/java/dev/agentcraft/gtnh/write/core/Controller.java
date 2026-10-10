@@ -67,6 +67,14 @@ public final class Controller {
 
         /** Sends one signed g2c frame with a fresh id, nonce and ts; returns the frame id, or null when nothing was sent. */
         String send(String type, Map<String, Object> body);
+
+        /**
+         * Fail-closed invalidation: every frame queued but not yet on the wire is discarded and can no
+         * longer be sent, and the connection is closed (the control service then voids every open
+         * confirmation of the connection). Idempotent. The link reconnects by itself; a game lock is
+         * announced again on the new connection.
+         */
+        void invalidate();
     }
 
     public interface Notifier {
@@ -90,25 +98,27 @@ public final class Controller {
 
     private static final class PromptRec {
 
-        final String token, requestId, playerUuid;
+        final String token, requestId, playerUuid, playerName;
         final long expires;
 
-        PromptRec(String token, String requestId, String playerUuid, long expires) {
+        PromptRec(String token, String requestId, String playerUuid, String playerName, long expires) {
             this.token = token;
             this.requestId = requestId;
             this.playerUuid = playerUuid;
+            this.playerName = playerName;
             this.expires = expires;
         }
     }
 
     private static final class Pending {
 
-        final String id, playerUuid, cap;
+        final String id, playerUuid, playerName, cap;
         final long sentAt;
 
-        Pending(String id, String playerUuid, String cap, long sentAt) {
+        Pending(String id, String playerUuid, String playerName, String cap, long sentAt) {
             this.id = id;
             this.playerUuid = playerUuid;
+            this.playerName = playerName;
             this.cap = cap;
             this.sentAt = sentAt;
         }
@@ -282,9 +292,7 @@ public final class Controller {
             }
         } else {
             boolean changed = armed || !r.reason.equals(disarmReason);
-            armed = false;
-            disarmReason = r.reason;
-            dropAll("disarmed: " + r.reason);
+            disarm(r.reason);
             if (changed) {
                 audSys("disarm", "-", "-", "disarmed", r.reason);
                 note.stateChanged();
@@ -295,20 +303,53 @@ public final class Controller {
 
     private void forceDisarm(String reason) {
         boolean was = armed || !reason.equals(disarmReason);
-        armed = false;
-        disarmReason = reason;
-        dropAll("disarmed: " + reason);
+        disarm(reason);
         if (was) note.stateChanged();
     }
 
-    private void dropAll(String why) {
+    /**
+     * Disarms. Every open confirmation is dropped and its request resolved at once as cancelled; when
+     * writes were armed (or a confirmation was open) the uplink is invalidated: queued frames die and the
+     * connection closes, so the control service's connection-close cleanup voids all of its tokens.
+     */
+    private void disarm(String reason) {
+        boolean wasArmed = armed, hadPrompts = !prompts.isEmpty();
+        armed = false;
+        disarmReason = reason;
+        if (wasArmed || hadPrompts) up.invalidate();
+        dropAll("disarmed: " + reason, "disarmed: " + reason);
+    }
+
+    /**
+     * Drops every open confirmation locally. {@code cancelled} null: nothing else (the link is gone and the
+     * pending requests are answered "unknown" by the caller); else each dropped request is resolved now as
+     * cancelled with that text (audit detail "cancelled: ..."), so it is not left to time out as "unknown".
+     */
+    private void dropAll(String why, String cancelled) {
         if (prompts.isEmpty()) return;
         List<PromptRec> all = new ArrayList<>(prompts.values());
         prompts.clear();
         for (PromptRec r : all) {
             audit.record("system", "token-drop", r.requestId, "-", "-", why);
             note.promptClosed(r.playerUuid, r.token, why);
+            if (cancelled != null) resolveCancelled(r, cancelled);
         }
+    }
+
+    private void resolveCancelled(PromptRec r, String why) {
+        Pending p = pending.remove(r.requestId);
+        if (p == null) return;
+        audit.record("system", "result", p.cap, p.id, "cancelled", "cancelled: " + why);
+        note.result(p.playerUuid, p.id, p.cap, "cancelled", why, Collections.<String, String>emptyMap(), "", false);
+    }
+
+    /** Best effort: tells the control service that a token is dead (not rate limited: it only ever closes things). */
+    private void cancelUpstream(PromptRec r) {
+        if (!armed || lock.isLocked() || !up.ready()) return;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("actor", actor(r.playerUuid, r.playerName));
+        body.put("token", r.token);
+        up.send("action.cancel", body);
     }
 
     // ---- link events ------------------------------------------------------------------------------
@@ -325,7 +366,7 @@ public final class Controller {
     public void onLinkDown(String why) {
         policy = null;
         hstate = null;
-        dropAll("connection closed");
+        dropAll("connection closed", null);
         if (!pending.isEmpty()) {
             for (Pending p : new ArrayList<>(pending.values())) {
                 note.result(p.playerUuid, p.id, p.cap, "unknown", "the link to the control service closed; check outside the game", Collections.<String, String>emptyMap(), "", false);
@@ -342,7 +383,10 @@ public final class Controller {
     /** A signed, verified control -> game message after the handshake. */
     public void onFrame(Msg m) {
         if (m instanceof Msg.Policy) {
+            Msg.Policy old = policy;
             policy = (Msg.Policy) m;
+            // the control service voided its tokens when it reloaded: close the local prompts on every revision change
+            if (old != null && !old.revision.equals(policy.revision)) dropAll("policy revision changed", "policy revision changed");
             recheck();
             note.stateChanged();
         } else if (m instanceof Msg.State) {
@@ -395,10 +439,12 @@ public final class Controller {
             if (old.playerUuid.equals(p.playerUuid)) {
                 it.remove();
                 note.promptClosed(old.playerUuid, old.token, "replaced by a newer confirmation");
+                cancelUpstream(old);
+                resolveCancelled(old, "replaced by a newer confirmation");
             }
         }
         long exp = Math.min(m.expiresAt, now + PROMPT_MS);
-        prompts.put(m.token, new PromptRec(m.token, m.re, p.playerUuid, exp));
+        prompts.put(m.token, new PromptRec(m.token, m.re, p.playerUuid, p.playerName, exp));
         Map<String, String> s = cleanMap(m.summary);
         audSys("prompt", s.get("card"), "-", "-", "confirm screen for " + s.get("profile") + " on " + s.get("board") + " (60 s)");
         note.prompt(p.playerUuid, m.re, m.token, exp - now, s);
@@ -536,7 +582,7 @@ public final class Controller {
             refuse(p, cap, "could not send to the control service (link down)", false);
             return;
         }
-        pending.put(id, new Pending(id, p.uuid, cap, clock.now()));
+        pending.put(id, new Pending(id, p.uuid, p.name, cap, clock.now()));
     }
 
     private static String offeredCheck(Msg.Policy pol, String cap, Map<String, Object> a) {
@@ -653,12 +699,7 @@ public final class Controller {
         aud(p, "cancel", "card.dispatch", r.requestId, "-", "cancelled by the player");
         note.promptClosed(p.uuid, token, "cancelled");
         pending.remove(r.requestId);
-        if (armed && !lock.isLocked() && up.ready() && bucket.tryTake(p.uuid)) {
-            Map<String, Object> body = new LinkedHashMap<>();
-            body.put("actor", actor(p.uuid, p.name));
-            body.put("token", token);
-            up.send("action.cancel", body);
-        }
+        cancelUpstream(r); // never depends on the request bucket: a cancel only closes things
     }
 
     // ---- lock -----------------------------------------------------------------------------------------
@@ -672,9 +713,12 @@ public final class Controller {
         String by = who.console() ? "console" : WriteAudit.who(who.player.name, who.player.uuid);
         String how = lock.lock(by, reason);
         aud(who.player, "lock", "-", "unlocked", "locked", (reason == null ? "" : reason) + " | " + how);
-        dropAll("write lock set");
+        // atomically: nothing queued before this lock may reach the wire after it
+        up.invalidate();
+        dropAll("write lock set", "locked");
+        recheck(); // (its disarm invalidates the uplink again, so the notice is queued after it)
+        // only goes out while the link is still ready: a real link has closed and announces the lock when it reconnects
         sendLockNotice(who.player, reason);
-        recheck();
         note.stateChanged();
         return "write lock " + how + (cfg.lockAlsoLocksEdit ? "; the edit tool is locked too" : "");
     }
@@ -729,11 +773,11 @@ public final class Controller {
 
     /** A player left: their open confirmations and requests are dropped, their rate bucket forgotten. */
     public void playerLeft(String uuid) {
-        for (Iterator<PromptRec> it = prompts.values().iterator(); it.hasNext();) {
-            PromptRec r = it.next();
-            if (r.playerUuid.equals(uuid)) {
-                it.remove();
+        for (PromptRec r : new ArrayList<>(prompts.values())) { // a copy: an audit failure below may disarm and clear the map
+            if (r.playerUuid.equals(uuid) && prompts.remove(r.token) != null) {
                 audSys("token-drop", r.requestId, "-", "-", "player left");
+                cancelUpstream(r);
+                resolveCancelled(r, "player left");
             }
         }
         bucket.forget(uuid);
