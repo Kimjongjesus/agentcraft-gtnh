@@ -42,6 +42,7 @@ PROMPT_LIMIT = {"perHour": 12}
 CHAT_FRAME = 1800
 CHAT_REPLY_CAP = 6000
 STATE_POLL_S = 1.0
+PING_S = 15.0  # the game side's socket read timeout is 60 s
 
 
 class Refuse(Exception):
@@ -703,13 +704,25 @@ class ControlService:
                 self.drop_tokens(None)
             await self.broadcast_state()
 
+    async def ping_all(self) -> None:
+        """WebSocket pings keep the game side's 60 s socket read timeout from firing on a quiet link."""
+        for c in list(self.conns):
+            try:
+                await asyncio.wait_for(c.ws.ping(), SEND_TIMEOUT_S)
+            except (asyncio.TimeoutError, ConnectionError, RuntimeError, WSClosed):
+                await self._close(c, 1011, "ping failed")
+
     async def tick_loop(self) -> None:
         last_prune = time.monotonic()
+        last_ping = time.monotonic()
         while True:
             await asyncio.sleep(STATE_POLL_S)
             try:
                 self.check_clock()
                 await self.poll_state()
+                if time.monotonic() - last_ping >= PING_S:
+                    last_ping = time.monotonic()
+                    await self.ping_all()
                 if time.monotonic() - last_prune > 3600:
                     last_prune = time.monotonic()
                     self.ledger.prune(self.now())
