@@ -87,6 +87,32 @@ offline dev player's UUID, and **every other check still applies**. Otherwise th
 `status`/`verify` say why. A result that does not say `dryRun:true` under the override disarms the module and
 kills the override until restart, so nothing real can run under it.
 
+## Security review hardening (card 7 review, F4 / F5 / F8 / F11)
+
+- **F4, queued frames after a lock or disarm.** `Controller.Uplink.invalidate()` is called on the game lock and on
+  every armed -> disarmed transition (and whenever a Confirm prompt is open): `ControlLink` marks the connection
+  dead first, empties the outbox and closes the socket, so nothing queued before the lock can reach the wire after
+  it. The link reconnects by itself and announces a held lock first thing (`action.lock`). The control service's
+  connection-close cleanup voids every token of the old connection. Checks: `ControllerCheck.uplinkInvalidation`
+  (queued request, queued confirm, closing link, security disarm; staying disarmed does not bounce the link).
+- **F5, lock file.** `WriteLock.load` reads attributes with `NOFOLLOW_LINKS`; only `NoSuchFileException` means
+  unlocked. Access denied, any other I/O error, a directory or other non-regular file, and a symlink (dangling or
+  not) latch locked. A lock already held in memory still survives a vanished file. Checks: `HardeningCheck.lockFile`.
+- **F8, token lifecycle.** A new policy revision closes every local Confirm prompt; a replaced prompt and a
+  departing player's prompt are cancelled upstream; `action.cancel` no longer needs request-bucket credit;
+  voided prompts resolve as `cancelled` at once (see the open points below); the security disarm invalidates the
+  uplink. Checks: `ControllerCheck.tokenLifecycle`.
+- **F11, transport limit.** `WebSocketClient(maxMessage, strict)` is an opt-in constructor: the per-message limit
+  (all fragments together) is checked from the frame header before any payload is allocated or read; binary
+  frames, a new data frame inside an unfinished message, oversized or fragmented control frames and invalid UTF-8
+  close the connection. The write link uses `new WebSocketClient(16384, true)`; the read client keeps its defaults
+  (16 MiB, lenient). The option names nothing about the write wire, so the core-jar scan stays clean. Checks:
+  `HardeningCheck.transport` (loopback server, including a 1 GiB declared length that is refused without waiting
+  for it).
+- **Title row.** On the task wall and the decision screen the left title text (scope + the add-on's status) is
+  ellipsized to the width the right-hand stats / pill leave free, so `writes locked: ...` can no longer be drawn
+  over `open N / M done all time`.
+
 ## Core hooks (the only changes in `gtnh-mod`)
 
 `dev.agentcraft.gtnh.api.Extensions` holds two nullable provider fields, `server` and `client`; the core
@@ -161,7 +187,7 @@ untouched.
 ## Tests
 
 ```
-cd gtnh-write && dev/tests/run.sh     # pure Java (no Minecraft), JDK 8+: ProtoCheck, GateCheck, ControllerCheck, LockAuditCheck, ClientCheck (722 checks)
+cd gtnh-write && dev/tests/run.sh     # pure Java (no Minecraft), JDK 8+: ProtoCheck, GateCheck, ControllerCheck, LockAuditCheck, ClientCheck, HardeningCheck (795 checks)
 cd gtnh-mod   && dev/tests/run.sh     # core checks + the core-jar scan when build/libs has a jar
 cd gtnh-mod   && dev/tests/core-jar-scan.sh   # fails if any core class contains "action.", "acwrite" or "hermes_control"
 python3 gtnh-write/dev/tests/make_vector.py  # the HMAC test vector hard-coded in ProtoCheck
@@ -204,9 +230,10 @@ names a host.
 - The lists' own key listing (`UserList.func_152685_a`) returns player NAMES, not UUIDs; `McFacts` first read
   them as UUIDs and the gate never passed on a real server (found by the card 7 QA). It now reads each entry's
   profile (by reflection on `func_152688_e`) and fails closed (a marker that never equals a UUID) if that breaks.
-- Open: a Confirm request that the write lock (or a disarm) voids stays "waiting" in the game until the 90 s
-  timeout and then reports `unknown` (nothing ran: its token was never confirmed). The client shows the
-  cancellation at once (`PromptClosed`); the late `unknown` is the controller's conservative bookkeeping.
+- Fixed (security review F8): a Confirm request that the write lock or a disarm voids is resolved at once as
+  `cancelled` (audit detail `cancelled: locked` / `cancelled: disarmed: <reason>` / `cancelled: policy revision
+  changed`), not left to report `unknown` after 90 s. A link that drops still reports `unknown` (the game cannot
+  know what the control service did).
 - Open: the control service refuses a version 3 policy actor and has no dev allowance, so the loopback dry-run
   override (offline dev player = version 3 owner) cannot talk to the unmodified control service. The QA used a
   throwaway COPY of `hermes_control` with that one check skipped (`QA_ALLOW_V3_ACTOR`), nothing in the repo.
