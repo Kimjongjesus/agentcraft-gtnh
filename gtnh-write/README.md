@@ -161,11 +161,27 @@ untouched.
 ## Tests
 
 ```
-cd gtnh-write && dev/tests/run.sh     # pure Java (no Minecraft), JDK 8+: ProtoCheck, GateCheck, ControllerCheck, LockAuditCheck
+cd gtnh-write && dev/tests/run.sh     # pure Java (no Minecraft), JDK 8+: ProtoCheck, GateCheck, ControllerCheck, LockAuditCheck, ClientCheck (722 checks)
 cd gtnh-mod   && dev/tests/run.sh     # core checks + the core-jar scan when build/libs has a jar
 cd gtnh-mod   && dev/tests/core-jar-scan.sh   # fails if any core class contains "action.", "acwrite" or "hermes_control"
 python3 gtnh-write/dev/tests/make_vector.py  # the HMAC test vector hard-coded in ProtoCheck
 ```
+
+## QA on the test PC (`dev/qa/`)
+
+Throwaway data only, on loopback, small heaps (`_JAVA_OPTIONS` caps the RFG run JVMs; the build's own `-Xmx6G`
+would otherwise win), the control service always in `--dry-run` with mock executors and the example board
+fixture, a fresh key (mode 600) and a QA-only policy whose `actors` is the run's owner. Never a real world,
+server, Hermes or the real `hermes` CLI. Scripts use `$QA_DIR`, `$JAVA_HOME`, `$GRADLE_USER_HOME`; nothing here
+names a host.
+
+| file | what |
+| --- | --- |
+| `run-write-qa.sh` | `prep online\|loopback`, `control start\|stop\|status\|unlock-hermes`, `adapter start\|stop` (the READ adapter on `qa_setup.py fixture` data), `server start\|stop\|cmd\|run\|feed`, `client start\|stop` (private headless mutter), `stop-all`. The server refuses to start without the arena marker `prep` writes |
+| `qa_setup.py` | key file, QA policy, fixture Hermes home (cards `t-demo-1..8`, decisions `d-main-101..104`), board fixture, the offline UUID of a name |
+| `b1-online-gate.sh` | online-mode: `verify` all PASS, whitelist off/on, op/deop, whitelist add/remove, wrong key, other actor |
+| `b1-client-refusal.sh` | the offline dev client is refused by the online-mode server |
+| `b2-dry-run-screens.sh` + `b2-scenes-a.txt`, `b2-scenes-b.txt` | loopback dry-run override: verify (OVERRIDDEN, never PASS), then the dev client walks dispatch -> Confirm -> applied (dry run), the lock while a Confirm screen is open, a raw request refused and audited, unlock, decision screens, forms, write actions, chat, `/ask`, with a screenshot per scene |
 
 ## Contract readings picked (the stricter one) and open points
 
@@ -180,6 +196,17 @@ python3 gtnh-write/dev/tests/make_vector.py  # the HMAC test vector hard-coded i
   one, the first handshakes right after a server start may be refused until the clocks agree.
 - The WebSocket read timeout of the reused core client is 60 s, so the control service must send traffic or a
   WebSocket ping at least that often (the read adapter pings every 15 s).
-- Not exercised end to end: the Minecraft-bound classes (`mc/`, `client/`) and the live link were compiled and
-  built but not run; no server or client was started for this card. The wire, gate, controller, audit and lock
-  logic is covered by the pure checks.
+- Run end to end on the test PC (card 7 QA, see "QA" below): the Minecraft-bound classes, the live link, the gate
+  in online mode, the loopback dry-run override and the client screens were exercised with a plain Forge dev
+  server + dev client and the control service in `--dry-run`. Not exercised: a real (non-dry-run) executor, a
+  real Mojang-authenticated login (the dev client is offline), the NPC right-click itself (the chat window was
+  opened with the dev automation), and any GTNH modpack.
+- The lists' own key listing (`UserList.func_152685_a`) returns player NAMES, not UUIDs; `McFacts` first read
+  them as UUIDs and the gate never passed on a real server (found by the card 7 QA). It now reads each entry's
+  profile (by reflection on `func_152688_e`) and fails closed (a marker that never equals a UUID) if that breaks.
+- Open: a Confirm request that the write lock (or a disarm) voids stays "waiting" in the game until the 90 s
+  timeout and then reports `unknown` (nothing ran: its token was never confirmed). The client shows the
+  cancellation at once (`PromptClosed`); the late `unknown` is the controller's conservative bookkeeping.
+- Open: the control service refuses a version 3 policy actor and has no dev allowance, so the loopback dry-run
+  override (offline dev player = version 3 owner) cannot talk to the unmodified control service. The QA used a
+  throwaway COPY of `hermes_control` with that one check skipped (`QA_ALLOW_V3_ACTOR`), nothing in the repo.

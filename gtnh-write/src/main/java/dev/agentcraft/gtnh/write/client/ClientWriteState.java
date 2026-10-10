@@ -137,7 +137,7 @@ public final class ClientWriteState {
     public static String statusLine() {
         if (locked) return "writes locked: " + (lockInfo.isEmpty() ? "locked" : lockInfo) + (dryRun ? " \u00b7 DRY RUN" : "");
         if (!armed) return "writes disarmed: " + reason + (dryRun ? " \u00b7 DRY RUN" : "");
-        return "writes armed" + (dryRun ? " \u00b7 DRY RUN: nothing real executes" : "") + (overridden ? " [dev override]" : "");
+        return "writes armed" + (dryRun ? " \u00b7 DRY RUN" : "") + (overridden ? " [dev override]" : "");
     }
 
     /** The open Confirm request, or null (also null once its 60 s are up). */

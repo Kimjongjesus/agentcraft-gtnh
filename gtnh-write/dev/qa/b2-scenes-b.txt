@@ -73,7 +73,7 @@ say devgui close
 sleep 2
 say devhud on
 say devwrite cmd /ask helper-a what is the status
-sleep 8
+sleep 1
 say devshot b2-19-ask-in-chat
 sleep 4
 say devhud off

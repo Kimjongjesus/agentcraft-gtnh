@@ -138,7 +138,8 @@ final class WUi {
             if (style == NORMAL || !enabled) Ui.roundOutline(x0, y0, x1, y1, h / 2, 0.75, 0xFF000000 | (enabled && hover ? TH.accent : TH.line));
             UiFont f = style == NORMAL ? UiFont.regular() : UiFont.bold();
             float size = Math.min(Widgets.BODY, h * 0.62F);
-            f.drawFit(label, x0 + h * 0.5F, y0 + (h - f.lineHeight(size)) / 2 + 0.3F, size, x1 - x0 - h, 0xFF000000 | fg);
+            float tw = Math.min(f.width(label, size), x1 - x0 - h);
+            f.drawFit(label, x0 + (x1 - x0 - tw) / 2, y0 + (h - f.lineHeight(size)) / 2 + 0.3F, size, x1 - x0 - h, 0xFF000000 | fg);
             reg(name, x0, y0, x1, y1);
             if (hover && tip != null) WUi.tip(tip, mx, my);
         }
@@ -301,7 +302,8 @@ final class WUi {
     static void strip(float x0, float y0, float x1, int mx, int my, Btn lock, Btn actions) {
         UiFont reg = UiFont.regular(), bold = UiFont.bold();
         float h = STRIP_H;
-        // right side first, so the text knows how much room it has
+        float sz = Widgets.SMALL + 0.4F;
+        // the buttons on the right first, so the pills and the sentence know how much room they have
         float right = x1;
         lock.label = ClientWriteState.locked ? "Locked" : "Lock writes";
         lock.style(ClientWriteState.locked ? NORMAL : DANGER);
@@ -315,17 +317,25 @@ final class WUi {
             actions.at(right - aw, y0, aw, h);
             right -= aw + 3;
         }
+        // pills (the state always; the DRY RUN badge whenever the control service says so), then the sentence
         float x = x0;
-        float sz = Widgets.SMALL + 0.4F;
         x += Ui.pill(bold, stateWord(), x, y0 + 1, sz, stateColor()) + 3;
-        if (ClientWriteState.dryRun) x += Ui.pill(bold, "DRY RUN", x, y0 + 1, sz, AMBER) + 3;
-        if (ClientWriteState.overridden) x += Ui.pill(reg, "dev override", x, y0 + 1, sz, TH.raised) + 3;
+        if (ClientWriteState.dryRun && x + pillWidth(bold, "DRY RUN", sz) <= right) x += Ui.pill(bold, "DRY RUN", x, y0 + 1, sz, AMBER) + 3;
+        if (ClientWriteState.overridden && x + pillWidth(reg, "dev override", sz) + 70 <= right) x += Ui.pill(reg, "dev override", x, y0 + 1, sz, TH.raised) + 3;
         String t = stateText();
         float maxW = right - x - 2;
-        if (maxW > 20) reg.drawFit(t, x, y0 + (h - reg.lineHeight(Widgets.SMALL + 0.6F)) / 2, Widgets.SMALL + 0.6F, maxW, 0xFF000000 | TH.text);
+        boolean cut = false;
+        if (maxW > 40) {
+            reg.drawFit(t, x, y0 + (h - reg.lineHeight(Widgets.SMALL + 0.6F)) / 2, Widgets.SMALL + 0.6F, maxW, 0xFF000000 | TH.text);
+            cut = reg.width(t, Widgets.SMALL + 0.6F) > maxW;
+        }
         if (actions != null) actions.draw(mx, my);
         lock.draw(mx, my);
-        if (maxW > 20 && Widgets.inside(mx, my, x, y0, right, y0 + h) && reg.width(t, Widgets.SMALL + 0.6F) > maxW) tip(t, mx, my);
+        if (maxW > 40 && cut && Widgets.inside(mx, my, x, y0, right, y0 + h)) tip(t, mx, my);
+    }
+
+    private static float pillWidth(UiFont f, String text, float size) {
+        return f.width(text, size) + 2 * size * 0.55F;
     }
 
     /** What the user should be told about the newest result, or null when it is old (30 s). */

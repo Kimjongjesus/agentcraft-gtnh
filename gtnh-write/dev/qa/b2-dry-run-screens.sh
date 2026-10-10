@@ -65,7 +65,7 @@ WAIT=3 run "agentcraft write audit 30"
 step "collect evidence"
 SRVDIR="$("$R" srvdir)"
 mkdir -p "$QA/shots"
-cp "$("$R" client shot-dir)"/devshot-*.png "$QA/shots/" 2>/dev/null
+cp "$("$R" client shot-dir)"/screenshots/devshot-*.png "$QA/shots/" 2>/dev/null
 cp "$QA/server.log" "$EV/part2-server.log"; cp "$QA/control.log" "$EV/control.log"; cp "$QA/client.log" "$EV/client.log"; cp "$QA/adapter.log" "$EV/adapter.log"
 cp "$QA/control-audit.jsonl" "$EV/control-audit.jsonl"
 cp "$SRVDIR/agentcraft-write-audit.log" "$EV/agentcraft-write-audit.log" 2>/dev/null

@@ -147,6 +147,7 @@ abstract class WriteScreen extends GuiScreen {
     /** One result line (colour by outcome) at (x, y); returns the y after it. */
     protected float resultLine(float x, float y, float w) {
         ClientWriteState.ResultInfo r = ClientWriteState.lastResult();
+        if (r != null && "prompted".equals(r.status)) return y; // the Confirm screen itself says that
         String s = WUi.recentResultLine();
         if (s == null) return y;
         UiFont reg = UiFont.regular();

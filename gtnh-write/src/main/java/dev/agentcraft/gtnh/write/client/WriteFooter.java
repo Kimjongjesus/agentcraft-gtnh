@@ -39,7 +39,7 @@ public final class WriteFooter implements Extensions.ClientHooks {
             WriteClient.lock("locked from the game screen");
         }
     });
-    private final WUi.Btn actions = new WUi.Btn("footer.actions", "Write actions").on(new Runnable() {
+    private final WUi.Btn actions = new WUi.Btn("footer.actions", "Actions").tip("Write actions: restart a service, run a job, see the last results").on(new Runnable() {
 
         @Override
         public void run() {
@@ -70,7 +70,9 @@ public final class WriteFooter implements Extensions.ClientHooks {
 
     @Override
     public String statusLine(String screen) {
-        return ClientWriteState.statusLine();
+        // the core screens print this next to their title: keep it short (the strip below has the full text)
+        String s = ClientWriteState.statusLine();
+        return s.length() > 48 ? s.substring(0, 47) + "\u2026" : s;
     }
 
     @Override
@@ -85,10 +87,12 @@ public final class WriteFooter implements Extensions.ClientHooks {
         float cy = y0 + 2 * (ROW + 3) + 1;
         UiFont reg = UiFont.regular();
         String res = WUi.recentResultLine();
-        float half = (x1 - x0) * (res == null ? 1F : 0.56F);
-        reg.drawFit(lay.hint, x0 + 1, cy, Widgets.SMALL + 0.4F, half - 4, 0xFF000000 | WUi.TH.muted);
+        boolean both = res != null && !lay.hint.isEmpty();
+        float half = both ? (x1 - x0) * 0.56F : (x1 - x0);
+        if (!lay.hint.isEmpty()) reg.drawFit(lay.hint, x0 + 1, cy, Widgets.SMALL + 0.4F, half - 4, 0xFF000000 | WUi.TH.muted);
         if (res != null) {
-            reg.drawFit(res, x0 + half, cy, Widgets.SMALL + 0.4F, x1 - x0 - half, 0xFF000000 | WUi.resultColor(ClientWriteState.lastResult()));
+            float rx = both ? x0 + half : x0 + 1;
+            reg.drawFit(res, rx, cy, Widgets.SMALL + 0.4F, x1 - rx, 0xFF000000 | WUi.resultColor(ClientWriteState.lastResult()));
         }
         WUi.flushTip();
     }
