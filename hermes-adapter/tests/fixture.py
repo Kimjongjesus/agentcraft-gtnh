@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 SCHEMA = """
@@ -85,7 +86,10 @@ class Fixture(BoardFixture):
         (self.home / "cron").mkdir(parents=True)
         (self.home / "cron" / "jobs.json").write_text(json.dumps({"jobs": [
             {"id": "a1", "name": "ops.daily-report", "enabled": True, "state": "scheduled", "last_status": "ok",
-             "last_run_at": "2026-10-05T01:00:00-04:00", "next_run_at": "2099-01-01T06:30:00-04:00",
+             # relative to `now`: the feed only shows cron runs of the last 3 days, so a fixed date
+             # made the feed test fail a few days after it was written
+             "last_run_at": datetime.fromtimestamp(now - 6 * 3600, timezone.utc).isoformat(),
+             "next_run_at": "2099-01-01T06:30:00-04:00",
              "failure_streak": 0, "prompt": "SECRET PROMPT " + FAKE_TOKEN, "deliver": "discord:123456789012345678",
              "schedule": {"kind": "cron", "expr": "30 6 * * *", "display": "30 6 * * *"}},
         ]}))
