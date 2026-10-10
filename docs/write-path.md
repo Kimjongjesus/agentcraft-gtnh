@@ -1,11 +1,13 @@
 # Card 7: the write path (design, not implemented)
 
-Status: **design proposal, awaiting the owner's approval.** No code in this repository acts on
-Hermes from the game yet. Today the adapter refuses every client intent and every `action.*`
-message (`hermes-adapter/hermes_adapter/server.py`, `MUTATING` / `MUTATING_PREFIXES`), and the mod
-has exactly one client-to-server packet, the card 6 edit-tool request, which never leaves the game
-server. This document says what card 7 will add, what it will never add, and what has to be true
-before the first line of it is written.
+Status: **design proposal, awaiting the owner's approval.** An independent security review of the
+first draft has been folded in (signed handshake, nonce and idempotency rules, confirm-token
+atomicity, lock semantics, audit failure, chat toolset, decision classification). No code in this
+repository acts on Hermes from the game yet. Today the adapter refuses every client intent and every
+`action.*` message (`hermes-adapter/hermes_adapter/server.py`, `MUTATING` / `MUTATING_PREFIXES`),
+and the mod has exactly one client-to-server packet, the card 6 edit-tool request, which never
+leaves the game server. This document says what card 7 will add, what it will never add, and what
+has to be true before the first line of it is written.
 
 All names, hosts and addresses below are made up (`host-a`, `service-1`, RFC 5737 `192.0.2.x`).
 
@@ -14,7 +16,7 @@ All names, hosts and addresses below are made up (`host-a`, `service-1`, RFC 573
 | decision | consequence in this design |
 | --- | --- |
 | Writes go through a **control service with an allowlist**: answer decisions, create / edit / dispatch cards, chat with agents (click an agent for a chat window, and `/ask`), restart a named service, rerun a scheduled job. | Section 3 lists every action. Anything not in that list has no message, no code path and no policy entry. |
-| A Confirm in the game counts as **named approval only for that allowlist**. Hypervisor, storage pools, reverse proxy and single sign-on stay outside the game (chat bridge or terminal). | Those capabilities do not exist in the protocol (section 4.3), so no policy file can switch them on. |
+| A Confirm in the game counts as **named approval only for that allowlist**. Hypervisor, storage pools, reverse proxy and single sign-on stay outside the game (chat bridge or terminal). | Those capabilities do not exist in the protocol (section 4.2), so no policy file can switch them on. |
 | A **Confirm screen only on builder dispatch.** | `card.dispatch` is the only two-step action (section 5). |
 | An **audit log** of every game-originated action and a **one-click write lock** (server-wide, like `/agentcraft edit lock`). | Two audit logs and two locks, one on each side (section 6). |
 | The server runs **`online-mode=true` with a whitelist (only the owner) before any write path exists**. | The write module refuses to arm until a verification step passes, and re-checks it on every request (section 7). |
@@ -78,7 +80,11 @@ Why three pieces instead of teaching the adapter to write:
   executor runs programs only from an argument list fixed in the policy file, never through a shell,
   and never with text that came from the game in the program position.
 - Every reply text that goes back to the game passes the adapter's privacy filter (secrets,
-  personal notes, addresses) before it leaves the host, exactly like the read path.
+  personal notes, addresses) before it leaves the host, exactly like the read path. The filter is
+  pattern-based, so it is a second line of defence, not the boundary: the first is what the
+  game-chat toolset may read at all (section 3). Chat replies are filtered as a whole (or in
+  complete paragraphs), never chunk by chunk, so a secret cannot slip through split across two
+  frames.
 
 ## 3. The allowlist
 
@@ -90,7 +96,7 @@ else.
 | `decision.answer` | answers an **open** decision: one of its offered options, or free text when the decision takes text. Uses the same path as the owner's existing answer tool, so the card is commented and released exactly as if answered outside the game. | 1 | no | 20 / hour |
 | `card.create` | creates a card on an allowlisted board, unassigned or in triage, tagged as made in the game. Never starts work by itself. | 1 | no | 20 / hour |
 | `card.edit` | title, body, priority of a card that is not running; or a comment on any card. | 1 | no | 60 / hour |
-| `agent.chat` | sends a message to an allowlisted agent in a chat session and streams the reply into the chat window. | 1 | no | 10 / minute, 2000 characters |
+| `agent.chat` | sends a message to an allowlisted agent in a chat session and shows the reply in the chat window (in complete paragraphs, after filtering). | 1 | no | 10 / minute, 2000 characters |
 | `agent.ask` | `/ask <agent> <question>`: one question, one answer printed in the chat. Same rules as `agent.chat`, no session kept. | 1 | no | 10 / minute |
 | `card.dispatch` | assigns a card to an allowlisted builder profile and lets the dispatcher start it. | 2 | **yes** | 6 / hour, 1 per card per 10 minutes |
 | `service.restart` | restarts one **named** service from the policy (the game sends only the name). | 2 | no (the button press is the approval) | per service: 1 per 10 minutes; 6 / hour overall |
@@ -102,9 +108,23 @@ Rules that hold for all of them:
   machine, which is exactly what must stay out of the game. Proposed default: the game may answer
   `Deny` (and add a note), never `Approve`; the decision screen shows "approve outside the game".
   Open question 1 asks the owner to confirm.
-- Chat cannot approve, unblock or dispatch anything, and the agent answering a game chat runs with
-  the toolset the policy names for game chat (proposed: read-only tools, no shell; open question 3).
-  A one-shot command that bypasses approvals is never used for game chat.
+- **Which decisions the game may answer is decided on the Hermes side, from board data, not from
+  text the game sends.** Today a decision counts as a permission because its reason starts with
+  `PERMISSION`. The control service classifies every open decision itself (block kind plus that
+  prefix) and only lets the game answer the ones it classifies as plain questions; anything it
+  cannot classify is shown read-only. The game can only pick one of the offered options, or send
+  free text where the decision takes text.
+- **A game answer, card or comment is never an approval for anything else.** Builders read cards,
+  comments and answers, so text written in the game reaches agents. Every write is tagged as made
+  in the game, and the agents' own rules treat approvals written inside such text as no approval:
+  anything a builder needs permission for is still asked as a permission halt, which the game
+  cannot approve. Dispatching a card approves that card's work, not every command the builder may
+  later ask for.
+- Chat cannot approve, unblock or dispatch anything. A game chat runs in its own session with a
+  tool allowlist that Hermes **enforces** (proposed: read-only tools, no shell, no delegation to
+  agents with more tools, no credentials beyond what those tools need; open question 3). It never
+  resumes a session that has broader tools. If the enforcement cannot be shown in a test, chat
+  stays disabled. A one-shot command that bypasses approvals is never used for game chat.
 - Service and job names, boards, builder profiles and chat agents all come from the policy file. The
   game shows only what the policy offers (it is sent in `action.policy`, section 4.4), and the
   control service checks the name again on every request.
@@ -120,12 +140,23 @@ serve both on one port if it wants; the rules below do not change.
 
 ### 4.1 Opting in and framing
 
-The game server's write module connects to the control endpoint and sends a normal `hello` with
-`"features": ["action"]`. The control service answers with `ack {result: {features: ["action"]}}`
-followed by `action.policy` (4.4) and `action.state` (6.2). A connection that did not ask gets
-nothing.
+The game server's write module connects to the control endpoint. The handshake is signed too, so
+nothing is trusted before both sides have proved they hold the key:
 
-Every frame after `hello`, in both directions, is **signed**:
+1. On connect the control service sends `action.challenge {session, challenge}` (128 random bits
+   each), signed.
+2. The write module answers with a signed `hello` with `"features": ["action"]` whose payload
+   repeats `session` and `challenge`.
+3. The control service answers with a signed `ack {result: {features: ["action"]}}`, then
+   `action.policy` (4.4) and `action.state` (6.2).
+
+Anything else first, an unsigned `hello`, a wrong challenge or a second `hello` closes the
+connection. None of the read adapter's leniency carries over (it treats any first message as a
+hello and does not check versions): here `v` must be `1`, and every payload must name the `session`
+and its `dir` (`c2g` or `g2c`); a frame with the wrong session or direction is dropped. A
+connection that did not ask for the feature gets nothing.
+
+Every frame, in both directions, has this shape:
 
 ```json
 { "v": 1, "type": "action.request", "payload": "<the message as a JSON string>", "sig": "<hex>" }
@@ -134,12 +165,19 @@ Every frame after `hello`, in both directions, is **signed**:
 - `sig` = HMAC-SHA256 over the exact UTF-8 bytes of `payload`, with the shared key. The receiver
   checks the signature first (constant-time compare), then parses `payload`. Signing the string as
   sent avoids any canonical-JSON rules between Java and Python.
-- `payload` carries `type` again (must match the outer `type`), `id` (request id, unique, at most
-  64 characters), `nonce` (128 random bits, hex), `ts` (milliseconds since the epoch) and the body.
-- A frame with a bad or missing signature, an outer and inner `type` that differ, a `ts` more than
-  60 s away from the receiver's clock, or a `nonce` seen in the last 10 minutes is dropped,
-  answered with a generic `error` and audited. The nonce cache is bounded; when it is full the
-  oldest entries go first, and the 60 s window still bounds any replay.
+- `payload` carries `type` again (must match the outer `type`), `session`, `dir`, `id` (request id,
+  unique, at most 64 characters), `nonce` (128 random bits, 32 hex characters), `ts` (milliseconds
+  since the epoch, an integer) and the body. A payload with duplicate keys, unknown fields or values
+  of the wrong type is refused.
+- A frame with a bad or missing signature, an outer and inner `type` that differ, a malformed
+  `nonce` or `ts`, a `ts` more than 60 s away from the receiver's clock, or a `nonce` already seen
+  is dropped, answered with a generic `error` and audited. The signature is checked before the
+  nonce takes any space in the cache.
+- Accepted nonces are kept until their `ts` is out of the window and are **never evicted early**:
+  when the cache is full, new frames are refused (and audited) until entries expire. The cache is
+  stored in the ledger, so a restart does not forget it; a frame whose `ts` is older than the last
+  start of the service is refused as well. If the clock jumps backwards by more than the window,
+  the service refuses everything until an operator restarts it.
 - Frames are at most 16 KiB; a larger one closes the connection.
 
 ### 4.2 Capabilities and tiers
@@ -191,23 +229,35 @@ names under `action.world.*`, their own module and their own review.
 
 | type | direction | fields (inside `payload`) |
 | --- | --- | --- |
-| `action.policy` | control -> game | what the game may offer: capabilities with tier, confirm flag and limits; service names; job names; boards; builder profiles; chat agents. Display data only; the control service re-checks every request. |
+| `action.challenge` | control -> game | `session`, `challenge` (first frame on a connection, 4.1). |
+| `action.policy` | control -> game | `actors` (the UUIDs the control service accepts), and what the game may offer: capabilities with tier, confirm flag and limits; service names; job names; boards; builder profiles; chat agents. Display data only; the control service re-checks every request. |
 | `action.state` | control -> game | `armed`, `locked`, `lockReason`, `lockedBy`, `since` for the Hermes-side lock (6.2). |
 | `action.request` | game -> control | `id`, `nonce`, `ts`, `actor {uuid, name}`, `capability`, `tier`, `args` (typed per capability, every string capped). |
 | `action.prompt` | control -> game | for `card.dispatch` only: `re`, `token`, `expiresAt` (60 s), `summary` (card id and title, profile, model, board, first lines of the body). The summary comes from Hermes, not from the request. |
-| `action.confirm` | game -> control | `id`, `nonce`, `ts`, `actor`, `token`. The token is single-use and bound to the actor and to a digest of the request; it expires after 60 s. |
+| `action.confirm` | game -> control | `id`, `nonce`, `ts`, `actor`, `token`. |
 | `action.cancel` | game -> control | `token`. |
+| `action.lock` | game -> control | `reason`, `actor`: tells the control service the game-side lock was set (audit only, 6.2). |
 | `action.result` | control -> game | `re`, `status` (`applied`, `refused`, `queued`, `unknown`), `error` (short, filtered), `result` (small dict, filtered), `audit` (the audit line id). |
 | `action.chat` | control -> game | `conversation`, `agentId`, `text` (filtered, capped), `final`. |
 
 Semantics:
 
-- **Idempotency:** the control service records every request id in a ledger (SQLite, kept 24
-  hours) before doing any work. The same id again returns the first result and never runs twice.
-- **`unknown`, not `failed`:** if an executor times out, the result is `unknown` and the panel says
-  "check outside the game". The game never retries by itself.
+- **Idempotency:** request ids are scoped to the actor. Before doing any work the control service
+  atomically claims `(actor, id)` together with a digest of the request in the ledger (SQLite, kept
+  24 hours). The same id with the same digest returns the stored state and never starts the work
+  again; the same id with a different digest is refused. A claim moves `pending` -> `applied` /
+  `refused` / `unknown`. If the service dies between doing the work and recording it, the claim
+  stays `pending` and becomes `unknown` at the next start: it is **never re-run automatically**.
+  The guarantee lasts as long as the ledger keeps the id (24 hours); executors also de-duplicate
+  where Hermes allows it (for example an idempotency key when creating a card).
+- **`unknown`, not `failed`:** if an executor times out or a claim is left `pending`, the result is
+  `unknown` and the panel says "check outside the game". The game never retries by itself.
 - **Fail closed, no queue:** if the connection is down, requests fail at once in the game. Nothing
   is stored and sent later.
+- **Confirm tokens** are 128 random bits, single-use, valid 60 s, and bound to the actor, the full
+  dispatch request (card, profile, board), the card's revision and the policy revision at prompt
+  time. They are dropped when the player cancels, when the game or Hermes side locks, when the
+  write module disarms and when the connection closes.
 
 ## 5. The Confirm screen (builder dispatch only)
 
@@ -218,8 +268,11 @@ Semantics:
 4. The write module shows the Confirm screen to **that player only**: what will run, where and with
    which model, with "Confirm" and "Cancel". It closes itself after 60 s.
 5. "Confirm" sends `action.confirm` with the token. The game server checks that the confirming
-   player is the requesting player; the control service checks the token, the actor and that the
-   card has not changed since the prompt (otherwise it refuses and the player starts again).
+   player is the requesting player and runs its gate again (arming, lock, rate). The control
+   service then, in one ledger transaction, consumes the token and claims the dispatch, after
+   checking again **everything** it checked in step 3 (actor, policy and its revision, limits,
+   Hermes-side lock) and that the card's revision is still the one in the prompt. If anything
+   differs it refuses and the player starts again.
 
 The Confirm screen protects against misclicks and stale data. It does **not** protect against a
 modified client of an allowed player, which can send the confirm packet without showing anything.
@@ -238,22 +291,35 @@ That case is bounded by the allowlist, the rate limits, the audit and the lock (
   arguments (filtered, capped), decision (refused / prompted / applied / unknown) and duration.
   Chat text is stored filtered and capped at 300 characters.
 - The two logs share the request id, so a line in one can be found in the other.
+- **No audit, no action.** Unlike the card 6 edit audit (which records a write error and carries
+  on), the write path treats the audit as a safeguard: the control service writes and flushes the
+  admission record (with the ledger claim) **before** any executor runs, and refuses the request if
+  it cannot. The game side disarms when its audit file cannot be written. Keys and confirm tokens
+  are never written to either log; refusals of unauthenticated frames are logged at most once a
+  second with a counter, so a flood cannot fill the disk. Both files are owner-only (0600) and keep
+  the newest 8 MiB plus one rolled file.
 - `/agentcraft write audit [n]` shows the last game-side lines; a later panel may show them on the
   wall.
 
 ### 6.2 The write lock
 
 - **Game side:** `/agentcraft write lock [reason]` and a lock button in the write module's screens
-  (one click, no confirmation). Any op may lock; only an allowed writer or the console may unlock.
+  (one click, no confirmation). Any op may lock; only the owner or the console may unlock.
   Server-wide, persisted as `write-lock.json`, read at start, and an unreadable lock file counts as
-  locked (fail closed), exactly like the card 6 edit lock. While locked, the write module sends
-  nothing to the control service.
-- **Hermes side:** a lock file the control service checks before every execution, set and cleared
-  only from the Hermes host (terminal or the owner's chat bridge). While it is set every request is
-  refused and audited, whatever the game sends.
-- Locking in the game also sends a best-effort `action.lock` notice so the Hermes-side audit shows
-  it; it does not set the Hermes-side lock. Whether the game lock should also lock the edit tool is
-  open question 5.
+  locked (fail closed), exactly like the card 6 edit lock. The lock takes effect on the server
+  thread the moment it is set: every request not yet sent is refused, every open Confirm screen is
+  closed and its token dropped, and from then on the module sends the control service nothing but
+  the `action.lock` notice.
+- **Hermes side:** a lock file the control service checks at admission and again immediately before
+  every execution, set and cleared only from the Hermes host (terminal or the owner's chat bridge).
+  While it is set every request is refused and audited, whatever the game sends, and outstanding
+  confirm tokens are void.
+- **What a lock does not do:** it stops new actions; it does not undo or stop work that already
+  started. A builder already dispatched keeps running, a job already handed to the scheduler still
+  runs, and a restart already issued completes. Stopping those is done outside the game, as today.
+- Locking in the game sends a best-effort `action.lock` notice so the Hermes-side audit shows it;
+  it does not set the Hermes-side lock (open question 5 asks whether it should). Whether the game
+  lock should also lock the edit tool is part of the same question.
 
 ## 7. Online mode and whitelist before anything else
 
@@ -268,17 +334,20 @@ whitelist**, so the ops list matters too.
 | dedicated server | `MinecraftServer.isDedicatedServer()`; never on an integrated or LAN-opened world |
 | online mode on | `MinecraftServer.isServerInOnlineMode()` |
 | whitelist enforced | the dedicated player list's whitelist flag (`isWhiteListEnabled()` exists only on the server side; called only after the dedicated check) |
-| whitelist equals the allowed writers | every whitelisted UUID is in `write.allowedPlayers` and vice versa |
-| ops are a subset of the allowed writers | ops skip the whitelist, so an op who is not an allowed writer fails the check |
-| allowed writers are real accounts | each UUID is version 4 (online-mode accounts); a version 3 UUID is an offline-mode name hash |
-| control service agrees | its `action.policy` lists the same actor UUIDs, and the signed handshake round trip works |
+| whitelist equals the owner | the whitelist holds exactly the one UUID in `write.owner`, and nothing else |
+| ops are only the owner | ops skip the whitelist, so any op other than the owner fails the check (an empty ops list passes) |
+| the owner UUID is well formed | a version 4 UUID; a version 3 UUID is an offline-mode name hash. This is a sanity check against a mistyped config, not proof of an account: the proof is online mode itself |
+| identity per request | the actor is taken from the authenticated connection that sent the packet (`EntityPlayerMP` game profile) and must equal `write.owner` |
+| control service agrees | its `action.policy` lists exactly the owner's UUID as actor, and the signed handshake round trip works |
 | not locked | game-side and Hermes-side lock both clear |
 
-`write.allowedPlayers` is a list of UUIDs in the write module's config (not names, unlike the card 6
-editor list). The checks run at server start, every 30 seconds, and again on every request, because
-`/whitelist off`, `/op` or `/whitelist add` can change them at runtime. Any failure **disarms**: the
-module refuses everything, says why in `/agentcraft write status`, shows "writes disarmed: <reason>"
-in its screens and audits the change. It re-arms on its own once every check passes again.
+`write.owner` is one UUID in the write module's config (not a name, unlike the card 6 editor list).
+The owner decided that only they write; allowing a second writer later would be a config and policy
+change with its own review. The checks run at server start, every 30 seconds, and again on every
+request, because `/whitelist off`, `/op` or `/whitelist add` can change them at runtime. Any failure
+**disarms**: the module refuses everything, drops open confirm tokens, says why in
+`/agentcraft write status`, shows "writes disarmed: <reason>" in its screens and audits the change.
+It re-arms on its own once every check passes again.
 
 ### 7.2 Verification step (before card 7 code is enabled on any world)
 
@@ -291,12 +360,18 @@ in its screens and audits the change. It re-arms on its own once every check pas
    - a second, real account that is not whitelisted: "You are not white-listed on this server!".
 4. Live test: with the owner logged in, run `/whitelist off` from the console. Within one request
    (and at most 30 s) `/agentcraft write status` says disarmed, a write attempt is refused and
-   audited; `/whitelist on` re-arms it. Same with `/op <someone else>` and `/deop`.
-5. Save the console output and the audit lines as the evidence for the review. The write path is
+   audited, and an open Confirm screen can no longer be confirmed; `/whitelist on` re-arms it. Same
+   with `/whitelist add <someone else>`, `/op <someone else>` and `/deop`.
+5. Wrong places and wrong partners: the module must refuse to arm in single player and on a world
+   opened to LAN; with a control service whose policy names a different actor; with a malformed or
+   version 3 `write.owner`; and with a wrong key (handshake fails).
+6. Save the console output and the audit lines as the evidence for the review. The write path is
    enabled in the policy only after the owner has seen it.
 
-Online mode also encrypts the connection between the game client and the server, so packets on the
-local network cannot be read or replayed there.
+Online mode authenticates every login against the account service and encrypts the connection
+between the game client and the server, so other machines on the network cannot read the packets.
+It is not a substitute for the checks above (the encryption has no integrity tag of its own): the
+server still re-validates every request.
 
 ## 8. Threat model
 
@@ -311,14 +386,14 @@ the world itself (which card 7 never touches).
 | threat | answer |
 | --- | --- |
 | **Someone joins as the owner** (offline-mode name spoof) | online mode is required to arm (7.1); identity is the UUID of the authenticated connection, never a field in a packet |
-| **Another player on the server** | whitelist of the owner only, ops a subset of it, UUID allowlist in the game *and* in the control service; packets from anyone else are refused and audited |
+| **Another player on the server** | whitelist of the owner only, no op but the owner, owner UUID checked in the game *and* in the control service; packets from anyone else are refused and audited |
 | **Modified client of an allowed player** (a bad mod in the pack, a stolen session) | it can send any packet and skip any screen, including the Confirm. Bounded by: the allowlist (nothing outside section 3 exists), server-side re-checks of every field, rate limits on both sides, the Hermes-side lock and caps that the game cannot change, and both audit logs. It cannot approve permission halts, reach infrastructure or run arbitrary commands. |
 | **Spoofed game server** (any process on the local network or the Hermes host talking to the control port) | peer and Host allowlist, no `Origin`, and the HMAC key: without the key no frame is accepted |
-| **Replay** of a captured control frame | signed nonce plus timestamp: older than 60 s or seen before is dropped; request ids are idempotent, so a replayed id returns the old result and runs nothing |
-| **Replay of a Confirm** | tokens are single-use, bound to actor and request digest, valid 60 s, and invalid if the card changed |
-| **Flooding** | game side: per-player token bucket (1 request per 2 s, burst 3) and the per-capability limits; Hermes side: the same limits again, independently, plus at most 2 connections and 16 KiB frames |
-| **Text that tries to act** (prompt injection in a chat message, a card body, a decision answer) | text is data: it is never put into an argument list or a shell, cannot change policy or lock, and the chat agent runs with the game-chat toolset only |
-| **Data leaking back into the game** | every reply passes the privacy filter before it leaves the Hermes host, as on the read path |
+| **Replay** of a captured control frame | signed nonce plus timestamp: older than 60 s, older than the service's last start, or seen before is dropped; nonces are never evicted while still valid; request ids are idempotent per actor, so a replayed id returns the stored state and runs nothing |
+| **Replay of a Confirm** | tokens are random, single-use, bound to actor, request, card revision and policy revision, valid 60 s, consumed in the same transaction that claims the dispatch, and void after cancel, lock or disarm |
+| **Flooding** | game side: per-player token bucket (1 request per 2 s, burst 3) and the per-capability limits; Hermes side: the same limits again, independently, plus at most 2 connections and 16 KiB frames; unauthenticated frames are refused before they use nonce space or audit space |
+| **Text that tries to act** (prompt injection in a chat message, a card body, a decision answer) | text is data: it is never put into an argument list or a shell and cannot change policy or lock. Text written in the game is tagged as such, never counts as an approval for agents, and which decisions the game may answer is decided from board data (section 3). The chat agent runs with the enforced game-chat toolset only |
+| **Data leaking back into the game** | first, the game-chat toolset limits what an agent can read; second, every reply passes the privacy filter as a whole before it leaves the Hermes host, as on the read path |
 | **Control service down or slow** | fail closed, nothing queued, a timeout is `unknown` and never retried by the game |
 | **Key theft** | the key lives in two 0600 files, never on a command line, never in a log; rotating it is replacing both files and restarting |
 
@@ -335,8 +410,9 @@ review and the owner's approval.
 - Approve a permission halt (unless the owner answers open question 1 otherwise).
 - Edit the policy, the allowlist, the key or the Hermes-side lock.
 - Write to the world: that is the separate world-action track with its own tiers.
-- Act without the write module: the core jar stays read-only, and the read adapter keeps refusing
-  `action.*`.
+- Act without the write module: the core jar stays read-only towards Hermes (its one
+  client-to-server packet is the card 6 edit tool, which never leaves the game server), and the
+  read adapter keeps refusing `action.*`.
 - Act on a world in single player, on a LAN-opened world, or on a server that fails 7.1.
 
 ## 9. What card 7 would deliver (after approval)
@@ -345,10 +421,15 @@ review and the owner's approval.
    | lock | unlock | audit`, and the screens: decision answers, card create / edit, the dispatch
    Confirm screen, chat window and `/ask`, restart and run buttons on allowlisted tiles.
 2. The control service with policy, ledger, Hermes-side audit and lock, and the four executors.
-3. Tests: pure-Java checks for the gate (every 7.1 failure disarms), the token rules and the rate
-   limits; Python tests for signature, replay window, nonce cache, idempotency, tier mismatch,
-   unknown capability, policy typos, the lock, and a fuzz run of random frames; the core-jar scan;
-   the read adapter still refusing `action.*`.
+3. Tests: pure-Java checks for the gate (every 7.1 failure disarms and drops confirm tokens), the
+   token rules, the lock and the rate limits; Python tests for the signed handshake (unsigned or
+   repeated hello, wrong challenge, session and direction), signature, malformed and out-of-window
+   timestamps, nonce reuse and a full nonce cache, a restart in the middle of a replay window,
+   idempotency (same id with the same and with a different digest, a claim left `pending` by a
+   crash), tier mismatch, unknown capability, policy typos, refusal when the audit cannot be
+   written, decision classification (a permission can never be approved), the lock at admission
+   and before execution, the chat toolset boundary, and a fuzz run of random frames; the core-jar
+   scan; the read adapter still refusing `action.*`.
 4. QA on a test copy only, with the verification step of 7.2 as evidence, and nothing enabled on
    the real world until the owner says so.
 
@@ -358,17 +439,18 @@ review and the owner's approval.
    matches an allowlisted action, or not answerable at all?
 2. **Restart and job buttons:** a single press (your decision, as written) or a press-and-hold to
    avoid accidents? Are the default limits in section 3 right?
-3. **Chat toolset:** read-only tools without a shell (proposed), no tools at all, or the agent's
-   normal tools with approvals blocked?
+3. **Chat toolset:** read-only tools without a shell, enforced by Hermes (proposed), or no tools at
+   all? (The agent's normal tools with approvals blocked is not offered: it is not an enforced
+   boundary.)
 4. **Link between game server and Hermes host:** HMAC-signed frames give integrity but not privacy.
    Add TLS with a pinned certificate, run it through an SSH or VPN tunnel, or accept plaintext on
    the home network?
 5. **One lock or two:** should the write lock also lock the card 6 edit tool (one panic button), and
    should a game lock also set the Hermes-side lock (then unlocking needs the terminal)?
-6. **Testing on the copy:** the test copy runs in offline mode today, so the write module will not
-   arm there. Run the copy in online mode with your account for card 7 QA, or allow a dev-only
-   override that works only on a loopback-bound server with the control service in a dry-run mode
-   that executes nothing?
+6. **Testing:** a server in offline mode cannot arm the write module, so card 7 QA needs an
+   authenticated (online-mode) test server whitelisted for your account. Is that acceptable, or do
+   you want a dev-only override that works only on a loopback-bound server with the control service
+   in a dry-run mode that executes nothing?
 7. **First allowlist:** which services, which jobs, which builder profiles and which chat agents
    start enabled? (Proposed: none of the tier 2 ones until the verification step has passed.)
 8. **Presence:** should tier 2 actions also require being in the office (near the panel), as the
