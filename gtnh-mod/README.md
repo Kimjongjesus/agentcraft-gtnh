@@ -541,3 +541,7 @@ board content. Verification summary: the mod boots on a GTNH 2.9.0-beta-3 dev co
 spawning once, walking between stations, following board changes, falling back to the lounge when an
 anchor is missing, and restarting without duplicates; screenshots came from a plain Forge client, so
 rendering inside the full GTNH client is unverified.
+
+## Add-on hooks (card 7)
+
+`dev.agentcraft.gtnh.api.Extensions` has two nullable provider fields (server, client). The core does nothing extra while they are null, so this jar alone is a read-only view of Hermes. The optional write add-on (`../gtnh-write/`, a separate jar with its own channel) fills them in. The core jar must never contain the add-on's wire names: `dev/tests/core-jar-scan.sh` (also run by `dev/tests/run.sh` when `build/libs` holds a jar) fails if any core class contains `action.`, `acwrite` or `hermes_control`.

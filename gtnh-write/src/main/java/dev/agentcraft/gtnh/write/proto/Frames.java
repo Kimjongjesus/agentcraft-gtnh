@@ -42,42 +42,23 @@ public final class Frames {
     }
 
     public static String sign(byte[] key, String payload) {
-        try {
-            return Hex.encode(hmac(key, payload));
-        } catch (GeneralSecurityExceptionWrapper e) {
-            throw new IllegalStateException(e);
-        }
+        return Hex.encode(hmac(key, payload));
     }
 
-    private static final class GeneralSecurityExceptionWrapper extends Exception {
-
-        private static final long serialVersionUID = 1L;
-
-        GeneralSecurityExceptionWrapper(Throwable t) {
-            super(t);
-        }
-    }
-
-    private static byte[] hmac(byte[] key, String payload) throws GeneralSecurityExceptionWrapper {
+    private static byte[] hmac(byte[] key, String payload) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
             mac.init(new SecretKeySpec(key, "HmacSHA256"));
             return mac.doFinal(payload.getBytes(StandardCharsets.UTF_8));
         } catch (NoSuchAlgorithmException | InvalidKeyException e) {
-            throw new GeneralSecurityExceptionWrapper(e);
+            throw new IllegalStateException(e);
         }
     }
 
     /** Constant-time check of a 64-lowercase-hex signature against the payload string. */
     public static boolean verify(byte[] key, String payload, String sigHex) {
         if (sigHex == null || !Hex.isLowerHex(sigHex, 64)) return false;
-        try {
-            byte[] expected = hmac(key, payload);
-            byte[] given = Hex.decode(sigHex);
-            return MessageDigest.isEqual(expected, given);
-        } catch (GeneralSecurityExceptionWrapper e) {
-            return false;
-        }
+        return MessageDigest.isEqual(hmac(key, payload), Hex.decode(sigHex));
     }
 
     /** The wire text of a frame. */
