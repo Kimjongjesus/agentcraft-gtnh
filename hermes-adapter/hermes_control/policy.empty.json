@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "actors": [],
+  "lockSetsHermesLock": true,
+  "hermesProgram": ["hermes"],
+  "capabilities": {
+    "decision.answer": { "enabled": false, "permissionApprove": false, "handoffAnswerable": false },
+    "card.create":     { "enabled": false },
+    "card.edit":       { "enabled": false },
+    "card.dispatch":   { "enabled": false },
+    "agent.chat":      { "enabled": false },
+    "agent.ask":       { "enabled": false },
+    "service.restart": { "enabled": false },
+    "cron.run":        { "enabled": false }
+  },
+  "services": {},
+  "jobs": []
+}
