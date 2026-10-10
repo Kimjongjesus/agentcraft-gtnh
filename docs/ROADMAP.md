@@ -14,6 +14,7 @@ Compatibility target: **GT New Horizons 2.9.x only** (Forge 1.7.10, Java 8 throu
 | 1-2 | Hermes adapter (read-only, privacy-filtered) and the bridge mod: agents as NPCs walking to their stations, desk monitors, status lamps, fleet beacon. |
 | 3 | Task wall, goal atrium and agent library blocks with a bounded board sync (read-only). |
 | 4 | Readable UI: a bundled TrueType font (Nunito, plus JetBrains Mono for logs and ids) drawn from a texture atlas, a small widget toolkit, a panel registry and an office layout file; wall, atrium, library and monitors rebuilt on it with distance-based level of detail; waiting agents fan out and nameplates no longer pile up; one source of truth for done counts with the window labelled ("last 3 days" vs "all time"). |
+| 5 | Ops feeds as panels (fleet health, scheduled jobs, provider usage, alerts; the `ops.*` protocol and adapter source plugins) and a toast plus sound when a decision needs the player. Read-only. |
 | 6 | In-game office edit tool (op only): edit mode with an overlay, a Panel Inspector (rebind from a list, resize with a live preview, label, theme, duplicate, delete), a panel palette fed by the panel registry, an anchor editor, and a per-world layout with undo/redo, named snapshots with a diff, bundled presets and export/import with a dry run. It only ever places, moves or removes this mod's own panel blocks and anchors (never other blocks or machines); every change is audited, rate-limited and capped, and `/agentcraft edit lock` stops all of it server-wide. Still read-only towards Hermes. |
 | G1 | Factory telemetry: the read-only `aifactory` mod imported as `gtnh-factory/`, the opt-in `world.*` protocol extension, the adapter's factory source and a local world journal (see the GTNH agent track below). |
 
@@ -21,8 +22,7 @@ Compatibility target: **GT New Horizons 2.9.x only** (Forge 1.7.10, Java 8 throu
 
 | card | what |
 |---|---|
-| 5 | Ops feeds as panels (fleet health, scheduled jobs, provider usage, alerts) and a toast plus sound when a decision needs the player. Read-only. |
-| 7 | Write path through a small control service with an allowlist of actions (answer decisions, create, edit and dispatch cards, chat with agents, restart named services, rerun scheduled jobs). Confirmation on builder dispatch, an audit log and a one-click write lock; the server moves to online mode with a whitelist first. |
+| 7 | Write path through a small control service with an allowlist of actions (answer decisions, create, edit and dispatch cards, chat with agents, restart named services, rerun scheduled jobs). Confirmation on builder dispatch, an audit log and a one-click write lock; the server moves to online mode with a whitelist first. Design proposal (not approved, no code): [`write-path.md`](write-path.md). |
 | 8 | Read-only web dashboard on the local network. |
 | 9 | Install on a real world: fresh backup first, explicit owner approval, adapter running as a service. |
 
