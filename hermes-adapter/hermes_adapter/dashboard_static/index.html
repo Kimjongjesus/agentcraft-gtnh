@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#3B2A20">
+  <title>AgentCraft · Studio overview</title>
+  <link rel="stylesheet" href="/dashboard.css">
+  <script src="/dashboard.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to overview</a>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true">A</span><span>AgentCraft <span class="brand-sub">/ studio</span></span></a>
+      <span class="access-label">Read-only <span aria-hidden="true">·</span> No login</span>
+    </div>
+  </header>
+  <main id="main" tabindex="-1">
+    <div class="intro">
+      <div><p class="eyebrow">The observation desk</p><h1>Studio overview</h1><p class="intro-copy">Agents, work, and operations. A quiet view of what’s happening.</p></div>
+      <div class="connection-card" aria-label="Connection and freshness">
+        <div class="connection-top"><span id="connection-state" class="badge neutral" role="status" aria-live="polite">Connecting</span><span id="poll-count" class="mono muted">Polls —</span></div>
+        <p id="freshness">Waiting for the first snapshot.</p>
+        <div class="controls"><button id="refresh" type="button">Refresh now</button><button id="pause" type="button" aria-pressed="false">Pause updates</button><span class="small muted">Every ~3 seconds</span></div>
+      </div>
+    </div>
+    <div id="connection-notice" class="notice" role="status" aria-live="polite">Loading the read-only snapshot. No actions are sent to Hermes.</div>
+    <noscript><p class="notice">JavaScript is required to load this overview. This page does not change any data.</p></noscript>
+    <nav class="section-nav" aria-label="Overview sections">
+      <a href="#agents">Agents</a><a href="#boards">Work boards</a><a href="#decisions">Decisions</a><a href="#fleet">Fleet</a><a href="#jobs">Schedule</a><a href="#usage">Usage</a><a href="#alerts">Alerts</a><a href="#sources">Sources</a>
+    </nav>
+    <section id="agents" class="panel" aria-labelledby="agents-heading">
+      <div class="panel-heading"><div><p class="eyebrow">People at the desks</p><h2 id="agents-heading">Agents</h2></div><span id="agents-count" class="section-count">Waiting</span></div>
+      <div id="agents-content" class="agent-grid"><p class="empty">Loading agent status…</p></div>
+      <p id="agents-footnote" class="footnote"></p>
+    </section>
+    <section id="boards" class="panel work-panel" aria-labelledby="boards-heading">
+      <div class="panel-heading"><div><p class="eyebrow">The task wall</p><h2 id="boards-heading">Work boards</h2></div><span id="boards-count" class="section-count">Waiting</span></div>
+      <div id="boards-content" class="board-grid"><p class="empty">Loading board summaries…</p></div>
+      <p id="tasks-note" class="footnote">Task columns show the supplied snapshot, not an all-time task history.</p>
+      <div id="tasks-content" class="task-wall" tabindex="0" role="region" aria-label="Task columns; scroll horizontally on smaller screens"><p class="empty">Loading task columns…</p></div>
+    </section>
+    <div class="two-column">
+      <section id="decisions" class="panel decision-panel" aria-labelledby="decisions-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Waiting on you</p><h2 id="decisions-heading">Open decisions</h2></div><span id="decisions-count" class="section-count">Waiting</span></div>
+        <p class="decision-notice">Display only. Answer in Hermes, not on this dashboard.</p>
+        <div id="decisions-content"><p class="empty">Loading open decisions…</p></div>
+        <p id="decisions-footnote" class="footnote"></p>
+      </section>
+      <section id="fleet" class="panel" aria-labelledby="fleet-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Operational view</p><h2 id="fleet-heading">Fleet health</h2></div><span id="fleet-count" class="section-count">Waiting</span></div>
+        <div id="fleet-content"><p class="empty">Loading fleet status…</p></div>
+        <p id="fleet-footnote" class="footnote"></p>
+      </section>
+      <section id="jobs" class="panel" aria-labelledby="jobs-heading">
+        <div class="panel-heading"><div><p class="eyebrow">The daily rhythm</p><h2 id="jobs-heading">Scheduled jobs</h2></div><span id="jobs-count" class="section-count">Waiting</span></div>
+        <div id="jobs-content"><p class="empty">Loading scheduled jobs…</p></div>
+        <p id="jobs-footnote" class="footnote"></p>
+      </section>
+      <section id="usage" class="panel" aria-labelledby="usage-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Capacity &amp; limits</p><h2 id="usage-heading">Provider usage</h2></div><span id="usage-count" class="section-count">Waiting</span></div>
+        <div id="usage-content" class="usage-grid"><p class="empty">Loading provider usage…</p></div>
+        <p id="usage-footnote" class="footnote"></p>
+      </section>
+      <section id="alerts" class="panel" aria-labelledby="alerts-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Things to notice</p><h2 id="alerts-heading">Alerts</h2></div><span id="alerts-count" class="section-count">Waiting</span></div>
+        <div id="alerts-content"><p class="empty">Loading alerts…</p></div>
+        <p id="alerts-footnote" class="footnote"></p>
+      </section>
+      <section id="sources" class="panel" aria-labelledby="sources-heading">
+        <div class="panel-heading"><div><p class="eyebrow">Behind the observations</p><h2 id="sources-heading">Source states</h2></div><span id="sources-count" class="section-count">Waiting</span></div>
+        <div id="sources-content"><p class="empty">Loading source states…</p></div>
+        <p id="sources-footnote" class="footnote"></p>
+      </section>
+    </div>
+    <footer><span>AgentCraft <span aria-hidden="true">/</span> Warm Studio</span><span>Observation only. No commands, answers, or changes.</span></footer>
+  </main>
+</body>
+</html>

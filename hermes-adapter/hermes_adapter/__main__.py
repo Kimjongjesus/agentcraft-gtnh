@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from . import redact
+from .dashboard import DashboardError, DashboardServer, validate_bind as validate_dashboard_bind
 from .journal import JournalError, Retention, WorldJournal
 from .mapping import CAST_FILE_NAME, Mapper, load_cast
 from .ops import OpsHub, load_plugin
@@ -47,6 +48,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="hermes_adapter", description="Read-only AgentCraft protocol server for Hermes.")
     p.add_argument("--bind", default="127.0.0.1", help="interface address to listen on (default 127.0.0.1; wildcards refused)")
     p.add_argument("--port", type=int, default=7878)
+    d = p.add_argument_group("optional read-only HTTP dashboard")
+    d.add_argument("--dashboard", action="store_true", help="enable the separate GET-only dashboard listener")
+    d.add_argument("--dashboard-bind", default="127.0.0.1", help="numeric specific dashboard address (default 127.0.0.1)")
+    d.add_argument("--dashboard-port", type=int, default=8787, help="dashboard HTTP port (default 8787)")
+    d.add_argument("--dashboard-allow-lan", action="store_true", help="explicitly allow a non-loopback dashboard bind; no authentication or TLS")
     p.add_argument("--allow-host", action="append", default=[], help="extra accepted Host header value (repeatable)")
     p.add_argument("--allow-peer", action="append", default=[], help="extra client IP or CIDR allowed to connect (repeatable)")
     p.add_argument("--hermes-home", type=Path, default=None, help="global Hermes home (default: Hermes' standard home directory)")
@@ -167,6 +173,11 @@ def build_ops(args: argparse.Namespace) -> OpsHub | None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
+    if args.dashboard:
+        try:
+            validate_dashboard_bind(args.dashboard_bind, args.dashboard_port, args.dashboard_allow_lan)
+        except DashboardError as e:
+            raise SystemExit(str(e)) from None
     logging.basicConfig(level=args.log_level.upper(), format="%(asctime)s %(levelname)s %(name)s: %(message)s", stream=sys.stderr)
     # privacy first: the switch must be set before any source text is cleaned
     redact.set_redact_ips(not args.allow_ip_text)
@@ -228,15 +239,31 @@ def main(argv: list[str] | None = None) -> int:
     policy = build_policy(args)
     server = AdapterServer(source.read, mapper, host=args.bind, port=args.port, policy=policy, poll_interval=args.poll,
                            ops=ops, ops_tick=args.ops_tick, world=world)
+    dashboard = (DashboardServer(server, args.dashboard_bind, args.dashboard_port, args.dashboard_allow_lan)
+                 if args.dashboard else None)
 
     async def run() -> None:
-        await server.start()
         stop = asyncio.Event()
         loop = asyncio.get_running_loop()
-        for sig in (signal.SIGINT, signal.SIGTERM):
-            loop.add_signal_handler(sig, stop.set)
-        await stop.wait()
-        await server.stop()
+        registered = []
+        try:
+            await server.start()
+            if dashboard is not None:
+                await dashboard.start()
+            for sig in (signal.SIGINT, signal.SIGTERM):
+                loop.add_signal_handler(sig, stop.set)
+                registered.append(sig)
+            await stop.wait()
+        except DashboardError as e:
+            raise SystemExit(str(e)) from None
+        finally:
+            for sig in registered:
+                loop.remove_signal_handler(sig)
+            try:
+                if dashboard is not None:
+                    await dashboard.stop()
+            finally:
+                await server.stop()
 
     asyncio.run(run())
     return 0
