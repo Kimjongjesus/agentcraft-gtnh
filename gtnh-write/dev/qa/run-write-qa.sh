@@ -50,6 +50,7 @@ prep() {
   if pid_alive "$PIDS/server.pid" || pid_alive "$PIDS/control.pid"; then echo "stop the running QA processes first" >&2; exit 1; fi
   rm -rf "$SRV" "$CLI/screenshots" "$QA/state" "$QA/fixture"
   rm -f "$CLI"/devshot-*.png
+  rm -f "$QA/control-audit.jsonl" "$QA/control.log" "$QA/server.log" "$QA/client.log" "$QA/adapter.log"
   mkdir -p "$SRV/config" "$CLI/config" "$QA/state" "$QA/shots"
   chmod 700 "$QA/state"
   : > "$SRV/.qa-arena"
