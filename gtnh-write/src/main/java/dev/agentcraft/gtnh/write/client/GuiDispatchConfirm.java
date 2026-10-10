@@ -220,6 +220,9 @@ public class GuiDispatchConfirm extends WriteScreen {
         cy = para(line, cx, cy, w - 16, Widgets.BODY, reg, WUi.TH.text, 3) + 3;
         cy = para("Card " + (s.get("card") == null ? "" : s.get("card")) + "  " + (s.get("title") == null ? "" : s.get("title")), cx, cy, w - 16, Widgets.BODY, bold, WUi.TH.text, 2) + 2;
         cy = para("Builder " + (s.get("profile") == null ? "-" : s.get("profile")) + "  \u00b7  board " + (s.get("board") == null ? "-" : s.get("board")), cx, cy, w - 16, Widgets.SMALL + 0.6F, reg, WUi.TH.muted, 1) + 2;
+        if (r != null && r.result.get("would") != null) {
+            cy = para("The mock executor recorded: would " + r.result.get("would") + " (nothing ran).", cx, cy, w - 16, Widgets.SMALL + 0.6F, reg, WUi.TH.muted, 2) + 2;
+        }
         if (r != null && !r.audit.isEmpty()) reg.draw("audit " + r.audit, cx, cy, Widgets.SMALL + 0.6F, 0xFF000000 | WUi.TH.muted);
         WUi.Btn done = new WUi.Btn("close", "Close").style(WUi.PRIMARY).on(new Runnable() {
 

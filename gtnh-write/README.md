@@ -95,20 +95,37 @@ agent NPC (`EntityHermesAgent.interact`), the edit-tool lock query (`EditService
 recording), and a footer strip + status line on the decision screen and the task-wall card detail. The
 decision screen keeps saying "read-only: answer outside the game" until a footer delegate is installed.
 
-## Client side API (for the GUI helper)
+## Client screens (card 7, part A)
 
-Package `dev.agentcraft.gtnh.write.client`; no Minecraft types; safe to call from the render thread.
+Package `dev.agentcraft.gtnh.write.client`. Everything sends only through `WriteClient`; the server and the
+control service decide again, so a modified client gains nothing. Without this jar the core screens keep
+saying "read-only" (the core only asks the hooks this jar installs).
+
+| screen | where it comes from | what it does |
+| --- | --- | --- |
+| **Footer strip** (`WriteFooter`) | under the detail pane of the core's decision screen and task wall | status pill `ARMED` / `DISARMED` / `LOCKED`, a `DRY RUN` badge, the sentence `writes armed` / `writes disarmed: <reason>` / `writes locked: <reason>`, the one-click **Lock writes** button (no confirmation) and **Write actions** |
+| task wall footer | selected card | **Dispatch...** (pick a builder profile, then the Confirm screen), **Edit**, **Comment**, **New card**; a disabled button says why in its tooltip |
+| decision footer | selected decision | a plain question: its offered choices as buttons (sent at once); an open question: a text box + Send; a PERMISSION halt: only **Deny** (+ an optional note) and "approve outside the game"; hand-off and unrecognised decisions: read-only with that sentence. The kind is guessed with `DecisionKind` (a mirror of the control service's `classify.py`; display only, the service classifies again) |
+| **Confirm** (`GuiDispatchConfirm`) | the control service's `action.prompt` (sent to the requesting player only) | what will run (card id + title, board, builder profile, model, first body lines), a ring + "Expires in N s" countdown (60 s), **Confirm** / **Cancel**, a DRY RUN badge; closes itself on expiry, lock, disarm, control-link loss or when the server drops the prompt; closing it any other way cancels the token; after Confirm it shows the result (applied / refused / unknown, DRY RUN, audit id, what the mock recorded) |
+| Dispatch picker (`GuiDispatchPick`) | **Dispatch...** | the policy's builder profiles as buttons; sends `card.dispatch` only |
+| Card forms (`GuiCardForm`) | **New card** / **Edit** / **Comment** | simple forms (board, title, details, priority); only changed fields are sent on edit |
+| **Write actions** (`GuiWriteActions`) | footer strip | **Restart** buttons for the policy's services, **Run** buttons for its jobs, the last results |
+| Chat window (`GuiChatWindow`) | right-clicking an agent NPC (owner only; `ClientSide.openChatListener`) | a conversation with one agent (`agent.chat`, stable conversation id); says so when chat is off in the policy |
+| `/ask <agent> <question>` (`mc/AskCommand`) | server command registered by this jar | one `agent.ask`; the answer is printed into the Minecraft chat. Same queue, gate, owner check, limits and audit as a screen request |
+
+One hook was added to the core for the decision box: `Extensions.ClientHooks.footerKey` (called first by the
+decision screen's and task wall's `keyTyped`; `true` = a text box in the strip consumed the key, Esc included).
 
 **State** `ClientWriteState` (static): `armed`, `locked`, `hermesLocked`, `dryRun`, `overridden`, `linkUp`,
 `reason`, `lockInfo`, `revision`, `policy` (`capabilities` name -> `{tier, confirm, enabled}`, plus `boards`,
 `profiles`, `services`, `jobs`, `agents`; `policy.usable(cap)`), `pendingPrompt()` (token, requestId,
-`summary` {card, title, board, profile, model, body}, `msLeft()`), `lastResults()` / `lastResult()` (status
-`applied|refused|queued|unknown|prompted|cancelled`, `error`, `result`, `audit`, `dryRun`), `chatLines()` /
-`chatLines(agentId)`, `canWrite()`, `statusLine()` (`writes armed` / `writes disarmed: <reason>` /
-`writes LOCKED: <info>`), `takeOpenChat()`, and `version` (an `AtomicInteger`; redraw when it moves).
+`summary` {card, title, board, profile, model, body}, `msLeft()`), `lastResults()` / `lastResult()` /
+`resultFor(requestId)` (status `applied|refused|queued|unknown|prompted|cancelled`, `error`, `result`, `audit`,
+`dryRun`), `chatLines()` / `chatLines(agentId)`, `canWrite()`, `statusLine()` (`writes armed` /
+`writes disarmed: <reason>` / `writes locked: <info>`, plus `DRY RUN`), `takeOpenChat()`, and `version`.
 
-**Calls** `WriteClient` (each only sends a request; the server decides everything again; returns false and
-records a local refusal when writes are disarmed/locked):
+**Calls** `WriteClient` (each only sends a request; returns false and records a local refusal when writes are
+disarmed/locked):
 
 ```java
 WriteClient.requestDispatch(card, board, profile);      // then watch ClientWriteState.pendingPrompt()
@@ -122,10 +139,17 @@ WriteClient.chat(agent, conversation, text);  WriteClient.ask(agent, text);
 WriteClient.restartService(name);             WriteClient.runJob(name);
 ```
 
-**GUI plug-in points** `ClientSide` (client proxy): set `ClientSide.delegate` (an `Extensions.ClientHooks`)
-to draw/click the footer strips on screens `"decisions"` and `"taskwall"` (subject = the selected
-`DecisionData.Decision` / `HqData.Task`, or null), and `ClientSide.openChatListener` (called on the client
-thread with the agent id after the owner right-clicks an agent NPC).
+`ClientSide.delegate` / `ClientSide.openChatListener` stay public so another GUI could replace the footer and
+the chat window.
+
+### Dev automation (inert unless a property is set)
+
+`-Dagentcraft.dev.writeAuto=1` on the dev client turns on `WriteDevAuto`: the server console's `say devwrite ...`
+presses the same buttons a player presses (`click NAME` calls the screen's own `mouseClicked` at the button's
+centre, `type TEXT`, `key enter|esc|tab|back`, `chat AGENT`, `actions`, `cmd /ask ...`, `dump`, and `raw CAP k=v...`,
+which sends a request the way a modified client would, without the local armed/lock check). Only lines that come
+from the console's `say` are obeyed. Together with the core's `agentcraft.dev.connect` / `shotOnChat` (`devgui`,
+`devshot`).
 
 ## Network (`acwrite`)
 

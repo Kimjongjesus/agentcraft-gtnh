@@ -29,7 +29,7 @@ import cpw.mods.fml.common.gameevent.TickEvent;
  * the server console's {@code say} (they start with "[Server] ") are obeyed. Together with the core's
  * agentcraft.dev.connect / shotOnChat properties (devgui, devshot).
  */
-final class WriteDevAuto {
+public final class WriteDevAuto {
 
     private static final Pattern CMD = Pattern.compile("devwrite (\\S+)(?: (.*))?");
     private final ConcurrentLinkedQueue<String[]> queue = new ConcurrentLinkedQueue<String[]>();
@@ -79,7 +79,7 @@ final class WriteDevAuto {
         GuiScreen s = mc.currentScreen;
         switch (cmd) {
             case "click": {
-                float[] r = WUi.HITS.get(arg.trim());
+                float[] r = WUi.HITS.get(arg.trim().replace('_', ' '));
                 if (s == null || r == null) {
                     AgentCraftWrite.LOG.warn("WriteDevAuto click '{}': {}", arg, s == null ? "no screen" : "no such button in the last frame (" + WUi.HITS.keySet() + ")");
                     return;
@@ -108,6 +108,21 @@ final class WriteDevAuto {
             case "chat":
                 mc.displayGuiScreen(new GuiChatWindow(arg.trim(), mc.currentScreen));
                 return;
+            case "cmd": // a chat line / command typed as the player, e.g. "/ask helper-a hello"
+                mc.thePlayer.sendChatMessage(arg);
+                AgentCraftWrite.LOG.info("WriteDevAuto: sent '{}' as the player", arg);
+                return;
+            case "raw": { // a request the way a modified client would send it: no local armed/lock check (the server must refuse it)
+                String[] parts = arg.trim().split(" ");
+                java.util.Map<String, Object> a = new java.util.LinkedHashMap<String, Object>();
+                for (int i = 1; i < parts.length; i++) {
+                    int eq = parts[i].indexOf('=');
+                    if (eq > 0) a.put(parts[i].substring(0, eq), parts[i].substring(eq + 1).replace('_', ' '));
+                }
+                dev.agentcraft.gtnh.write.mc.WriteNet.CHANNEL.sendToServer(new dev.agentcraft.gtnh.write.mc.WriteNet.Req(parts[0], dev.agentcraft.gtnh.write.proto.StrictJson.write(a)));
+                AgentCraftWrite.LOG.info("WriteDevAuto: raw request {} {}", parts[0], a.keySet());
+                return;
+            }
             case "actions":
                 mc.displayGuiScreen(new GuiWriteActions(mc.currentScreen));
                 return;

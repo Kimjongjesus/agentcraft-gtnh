@@ -50,26 +50,43 @@ final class McFacts implements GateFacts {
             .isWhiteListEnabled();
     }
 
-    private static List<String> keys(String[] k) {
+    /**
+     * The UUIDs of a whitelist / ops list. The lists' own key listing (func_152685_a) returns player NAMES, which
+     * would let a second entry with the owner's name and another UUID look like the owner, so the entries are read
+     * with their profiles. If the entries cannot be read the result holds a marker that never equals a UUID
+     * (the gate then fails closed: the list is "not the owner").
+     */
+    @SuppressWarnings("unchecked")
+    private static List<String> uuids(net.minecraft.server.management.UserList list) {
         List<String> out = new ArrayList<>();
-        if (k != null) for (String s : k) out.add(s.toLowerCase(Locale.ROOT));
+        try {
+            java.lang.reflect.Method m = net.minecraft.server.management.UserList.class.getDeclaredMethod("func_152688_e");
+            m.setAccessible(true);
+            java.util.Map<String, net.minecraft.server.management.UserListEntry> map = (java.util.Map<String, net.minecraft.server.management.UserListEntry>) m.invoke(list);
+            java.lang.reflect.Method value = net.minecraft.server.management.UserListEntry.class.getDeclaredMethod("func_152640_f");
+            value.setAccessible(true);
+            for (net.minecraft.server.management.UserListEntry e : map.values()) {
+                Object v = value.invoke(e);
+                java.util.UUID id = v instanceof com.mojang.authlib.GameProfile ? ((com.mojang.authlib.GameProfile) v).getId() : null;
+                out.add(id == null ? "?entry-without-uuid" : id.toString().toLowerCase(Locale.ROOT));
+            }
+        } catch (ReflectiveOperationException | RuntimeException ex) {
+            out.add("?list-unreadable");
+            out.add("?list-unreadable");
+        }
         return out;
     }
 
     @Override
     public List<String> whitelist() {
         ServerConfigurationManager cm = server.getConfigurationManager();
-        return keys(
-            cm.func_152599_k()
-                .func_152685_a());
+        return uuids(cm.func_152599_k());
     }
 
     @Override
     public List<String> ops() {
         ServerConfigurationManager cm = server.getConfigurationManager();
-        return keys(
-            cm.func_152603_m()
-                .func_152685_a());
+        return uuids(cm.func_152603_m());
     }
 
     @Override

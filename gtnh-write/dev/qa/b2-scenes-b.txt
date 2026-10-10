@@ -1,0 +1,79 @@
+# Card 7 B2 scenes, part B (after the game and Hermes locks were cleared): decisions, forms, write actions, chat, /ask.
+# DEV/QA arena ONLY. See b2-scenes-a.txt for the command syntax.
+say devwrite sync
+sleep 3
+# 7. the decision screen: a PERMISSION halt shows only Deny (+ an optional note) and "approve outside the game"
+say devgui decisions d-main-103
+sleep 4
+say devshot b2-08-decision-permission
+sleep 4
+# 8. a plain question with its offered choices as buttons
+say devgui decisions d-main-101
+sleep 3
+say devshot b2-09-decision-question-choices
+sleep 4
+say devwrite click answer.Option_A
+sleep 5
+say devshot b2-10-decision-answered
+sleep 4
+# 9. an open question: a text box
+say devgui decisions d-main-102
+sleep 3
+say devwrite click footer.field
+say devwrite type Name_it_Widgetron
+sleep 2
+say devshot b2-11-decision-open-question
+sleep 4
+# 10. a hand-off decision stays read-only
+say devgui decisions d-main-104
+sleep 3
+say devshot b2-12-decision-handoff-readonly
+sleep 4
+# 11. deny the permission halt with a note
+say devgui decisions d-main-103
+sleep 3
+say devwrite click footer.field
+say devwrite type Not_now
+sleep 2
+say devwrite click answer.deny
+sleep 5
+say devshot b2-13-decision-denied
+sleep 4
+# 12. card forms: a new card
+say devgui taskwall - t-demo-1
+sleep 3
+say devwrite click footer.new
+sleep 2
+say devwrite type QA_card_from_the_game
+sleep 2
+say devshot b2-14-new-card-form
+sleep 3
+say devwrite click submit
+sleep 5
+say devshot b2-15-new-card-applied
+sleep 4
+# 13. the Write actions screen, then a restart (mock executor)
+say devwrite actions
+sleep 3
+say devshot b2-16-write-actions
+sleep 3
+say devwrite click restart.service-1
+sleep 5
+say devshot b2-17-write-actions-restart
+sleep 4
+# 14. the chat window (what clicking an agent NPC opens) and /ask
+say devwrite chat helper-a
+sleep 3
+say devwrite type hello_there
+say devwrite key enter
+sleep 8
+say devshot b2-18-chat-window
+sleep 4
+say devgui close
+sleep 2
+say devhud on
+say devwrite cmd /ask helper-a what is the status
+sleep 8
+say devshot b2-19-ask-in-chat
+sleep 4
+say devhud off
