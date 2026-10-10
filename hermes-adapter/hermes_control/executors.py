@@ -54,6 +54,7 @@ class ExecRequest:
     req_id: str
     policy: pol.Policy
     prep: dict[str, Any] = field(default_factory=dict)
+    revision: str = ""  # the policy revision this request was admitted under (checked again right before the executor runs)
 
 
 @dataclass

@@ -46,7 +46,7 @@ class LockFile:
             if not isinstance(d, dict):
                 raise ValueError
             since = d.get("since")
-            return LockState(True, str(d.get("reason", ""))[:200], str(d.get("by", ""))[:64], since if type(since) is int and since >= 0 else 0)
+            return LockState(True, str(d.get("reason", ""))[:4096], str(d.get("by", ""))[:4096], since if type(since) is int and since >= 0 else 0)
         except (OSError, ValueError, UnicodeDecodeError):
             return LockState(True, "lock file unreadable (treated as locked)", "system", 0)
 

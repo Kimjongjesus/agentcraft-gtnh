@@ -179,7 +179,8 @@ def _limits(raw: Any, cap: str) -> dict[str, int]:
     return out
 
 
-def parse(data: Any, file_hash: str = "") -> Policy:
+def parse(data: Any, file_hash: str = "", allow_offline: bool = False) -> Policy:
+    """``allow_offline`` is the QA-only ``--dev-offline-actors`` allowance (dry run on loopback): version 3 UUIDs pass."""
     top = _only(data, TOP_KEYS, "policy")
     if top.get("schema") != SCHEMA or type(top.get("schema")) is not int:
         raise PolicyError(f"policy.schema: must be {SCHEMA}")
@@ -191,7 +192,8 @@ def parse(data: Any, file_hash: str = "") -> Policy:
         if type(a) is not str or not frames.UUID_RE.match(a):
             raise PolicyError("policy.actors: each actor must be a lowercase canonical UUID string")
         if a[14] != "4" or a[19] not in "89ab":
-            raise PolicyError("policy.actors: actors must be version 4 UUIDs (online-mode accounts), never an offline name hash")
+            if not (allow_offline and a[14] == "3" and a[19] in "89ab"):
+                raise PolicyError("policy.actors: actors must be version 4 UUIDs (online-mode accounts), never an offline name hash")
         if a in actors:
             raise PolicyError("policy.actors: duplicate actor")
         actors.append(a)
@@ -280,7 +282,7 @@ def _require_enabled(c: CapPolicy, services: dict[str, ServicePolicy], jobs: tup
         raise PolicyError(f"capabilities.{c.name}: enabled but its allowlist is empty (boards / profiles / agents / toolsets / services / jobs)")
 
 
-def load(path: Path | str, check_perms: bool = True) -> Policy:
+def load(path: Path | str, check_perms: bool = True, allow_offline: bool = False) -> Policy:
     p = Path(path)
     if check_perms:
         try:
@@ -297,4 +299,4 @@ def load(path: Path | str, check_perms: bool = True) -> Policy:
         data = frames.strict_loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, frames.FrameError):
         raise PolicyError("policy file is not valid JSON (duplicate keys are refused too)") from None
-    return parse(data, hashlib.sha256(raw).hexdigest())
+    return parse(data, hashlib.sha256(raw).hexdigest(), allow_offline)

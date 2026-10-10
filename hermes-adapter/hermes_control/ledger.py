@@ -85,7 +85,7 @@ class Ledger:
             c.execute("DELETE FROM tokens")
             c.execute("DELETE FROM claims WHERE created_ms < ?", (now - CLAIM_KEEP_MS,))
             c.execute("DELETE FROM events WHERE ts_ms < ?", (now - 2 * 3600 * 1000,))
-            c.execute("DELETE FROM nonces WHERE expires_ms <= ?", (now,))
+            c.execute("DELETE FROM nonces WHERE expires_ms < ?", (now,))
 
     # ---- plumbing --------------------------------------------------------------------------
     @contextmanager
@@ -122,9 +122,11 @@ class Ledger:
 
     # ---- nonces -----------------------------------------------------------------------------
     def take_nonce(self, nonce: str, ts: int, now: int) -> str:
-        """'ok' | 'replay' | 'full'. Entries live until ts + 60 s and are never removed earlier."""
+        """'ok' | 'replay' | 'full'. Entries live until ts + 60 s INCLUSIVE (deleted only when expires < now),
+        matching the inclusive timestamp window: a frame is ts-valid at now == ts + 60000, so its nonce must
+        still be remembered at that exact millisecond."""
         with self._tx() as c:
-            c.execute("DELETE FROM nonces WHERE expires_ms <= ?", (now,))
+            c.execute("DELETE FROM nonces WHERE expires_ms < ?", (now,))
             if c.execute("SELECT 1 FROM nonces WHERE nonce = ?", (nonce,)).fetchone():
                 return "replay"
             n = c.execute("SELECT COUNT(*) FROM nonces").fetchone()[0]
@@ -276,4 +278,4 @@ class Ledger:
         with self._tx() as c:
             c.execute("DELETE FROM claims WHERE created_ms < ? AND state NOT IN (?, ?)", (now - CLAIM_KEEP_MS, PENDING, PROMPTED))
             c.execute("DELETE FROM events WHERE ts_ms < ?", (now - 2 * 3600 * 1000,))
-            c.execute("DELETE FROM nonces WHERE expires_ms <= ?", (now,))
+            c.execute("DELETE FROM nonces WHERE expires_ms < ?", (now,))

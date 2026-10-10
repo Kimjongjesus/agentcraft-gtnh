@@ -17,7 +17,7 @@ adapter's WebSocket server and privacy filter. Wire contract (normative):
     python3 -m hermes_control check-policy --policy hermes_control/policy.example.json
     python3 -m hermes_control serve --policy P --key-file K --state-dir D \
         [--lock-file L] [--audit-file A] [--bind 127.0.0.1] [--port 7879] \
-        [--dry-run] [--board-fixture F] [--allow-peer NET] [--allow-host H] [--insecure-lan-bind]
+        [--dry-run] [--board-fixture F] [--dev-offline-actors] [--allow-peer NET] [--allow-host H] [--insecure-lan-bind]
     python3 -m hermes_control lock --reason "why"        # set the Hermes-side lock
     python3 -m hermes_control unlock                     # clear it (terminal only, asks; --yes without a tty)
     python3 -m hermes_control status [--policy P]        # lock state, policy summary
@@ -35,13 +35,15 @@ adapter's WebSocket server and privacy filter. Wire contract (normative):
 | `--dry-run` | off | every executor is replaced by a mock that records the call (and the argv it would have used) and executes nothing; `dryRun: true` goes into `action.policy` and every `action.result` |
 | `--board-fixture` | none | a JSON file of cards and decisions used instead of the Hermes board (QA). Accepted **only** together with `--dry-run`. Example: `hermes_control/fixtures/board.example.json` |
 | `--hermes-home` | the global Hermes home | where board reads happen (`kanban.db` opened `mode=ro` + `PRAGMA query_only`, like the read adapter) |
+| `--dev-offline-actors` | off | **QA only.** Lets `policy.actors` name offline (version 3) UUIDs, which an offline-mode dev game server hands out. Refused unless `--dry-run` is also given **and** the bind is loopback (`127.0.0.0/8`, `::1`, `localhost`); the start-up line says `DEV-OFFLINE-ACTORS`, the `start` audit record carries `devOfflineActors: true`, and `action.policy` keeps `dryRun: true`. Without the flag a version 3 actor keeps the policy from loading (also on `SIGHUP`). Only version 3 with a valid variant is added; nothing else about actor checking changes. Never use it with a real board |
 
 The service **refuses to start** (exit status 2, reason on stderr) when: the policy has an unknown
 key or capability, `permissionApprove` is `true`, or a chat toolset has a denied name; the policy
 file, key file or state / lock / audit directory is not owned by the running user or is group/other
 writable; the key file is group/other readable (or is a symlink, too short, not hex); the state
 directory, lock file or audit log would live inside the git checkout; the audit log or ledger
-cannot be opened; `--board-fixture` is given without `--dry-run`; the bind address is a wildcard or a
+cannot be opened; `--board-fixture` is given without `--dry-run`; `--dev-offline-actors` is given
+without `--dry-run` or on a non-loopback bind; the bind address is a wildcard or a
 non-loopback address without `--insecure-lan-bind`. On `SIGHUP` an invalid policy is ignored and the
 old one stays (the failure is audited).
 
@@ -100,7 +102,8 @@ Default limits (also enforced by the game side): `decision.answer` 20/h, `card.c
 (`card.dispatch` prompts are additionally capped at 12/h and 4 open confirms per actor.)
 
 Reload with `SIGHUP`: the policy is re-read, the revision (`<hash>.<n>`) is bumped, every outstanding
-confirm token is void, and connected clients get a fresh `action.policy` and `action.state`.
+confirm token is void, and connected clients get a fresh `action.policy` and `action.state`. A reload
+also wins against work that was admitted but has not started its executor yet (next section).
 
 ## What each capability does on Hermes
 
@@ -149,6 +152,33 @@ request. Anything not recognised is read-only.
 
 The service records the **offered** option text, not the game's spelling.
 
+## Execution-time re-checks (the last gate before an executor)
+
+Admission and confirm validate against the board and the policy, but an admitted request can wait in
+the four-thread worker pool, and the board is not locked by the control ledger. So the worker thread
+repeats the checks **immediately before the executor call**, after the lock check, and refuses
+(`status: refused`) on any mismatch:
+
+- **Board.** The board is read again. `card.dispatch`: the card still exists, its revision equals the
+  one in the confirmed prompt (title, body, status, assignee, priority, run and block are all part of
+  it), its assignee is unchanged, and it is still dispatchable and not running. `decision.answer`: the
+  decision is still open and is the **same** decision (same id and event), is classified exactly as at
+  admission (kind, question, offered options) and the requested choice resolves to the same recorded
+  answer; a question that turned into a permission is refused, and Approve on a permission is never
+  sent. `card.edit`: the card still exists and is not running (a comment is always allowed).
+- **Policy.** Work is judged by the policy in force now: it is refused when the policy was reloaded
+  since admission (any reload, even to identical content, bumps the revision: the player simply sends
+  the request again), and also when the actor, the capability or the board / profile / agent / service /
+  job it names is not allowed any more. The policy swap of a reload and this authorise-and-start step
+  are serialised by one lock, so a reload either completes before the check (the work is refused) or
+  after the work started (a started command cannot be revoked).
+- **Lock.** Checked before and after the two steps above, including the in-memory latch (next section).
+
+**Residual window.** The `hermes` CLI has no conditional mutation (no "assign only if revision is X",
+no "unblock only decision N"), so the board is re-read and then the CLI is called; a change landing in
+those few milliseconds (the gap between this read and the CLI process reading the board) is not
+caught. If that is not acceptable, leave `card.dispatch` and `decision.answer` disabled.
+
 ## Lock
 
 `hermes.lock` (JSON: reason, by, since): if the file exists, or exists and cannot be read, the
@@ -156,18 +186,25 @@ service is locked. It is checked at admission and again, in the worker thread, i
 every executor call; a lock also voids outstanding confirm tokens and is pushed to clients in
 `action.state` within a second. An `action.lock` from the game sets the file (default policy) and
 voids tokens; it is accepted from any validly signed frame, because locking is the fail-safe
-direction. Nothing on the wire clears the lock: the service does not even import the function that
+direction. **The lock is latched in memory before the file is written**: if the write fails (disk
+full, permissions), admission and the worker guard still refuse everything, the failure is audited
+(`game-lock-persist-failed`), the write is retried on the one-second tick, and the latch stays until
+the process restarts (or, once the file has been written, until the terminal `unlock` removes it).
+Nothing on the wire clears the lock: the service does not even import the function that
 does. `python3 -m hermes_control unlock` is the only way, and it asks. A lock stops new actions only;
 a builder already dispatched, a job already handed to the scheduler and a restart already issued keep
-going.
+going. `lockReason` and `lockedBy` in `action.state` go through the adapter's privacy filter as whole
+strings (secrets, addresses, e-mail, personal notes) before the 200 / 64 character caps.
 
 ## Audit
 
 `hermes-control-audit.jsonl`, one record per received authenticated frame and per executor outcome:
 `id` (returned to the game as `audit`), `ts`, `event`, `req` (the request id, shared with the
 game-side log), actor UUID, capability, decision, arguments (filtered, strings capped at 300 characters;
-chat text capped at 300), `dryRun`. The admission record is written, flushed and fsynced **before** any
-executor runs; if that fails the request is refused ("no audit, no action"). Unauthenticated frames
+chat text capped at 300), `dryRun`. The admission record is written in full (short writes and `EINTR`
+are looped over; no progress is an error), then fsynced, **before** any executor runs; if that fails
+the request is refused ("no audit, no action") and a half-written record is cut back off the file
+(or, if that is impossible, the next record starts on a new line). Unauthenticated frames
 are logged at most once a second with a counter. Keys, signatures, session ids, challenges and confirm
 tokens are never written (tokens are also stored only as SHA-256 hashes in the ledger).
 
@@ -177,7 +214,9 @@ tokens are never written (tokens are also stored only as SHA-256 hashes in the l
 before the payload is parsed), 4. strict payload parse (duplicate keys, unknown keys, wrong types,
 bool-as-int, control characters, lone surrogates), type equality, session, direction,
 5. `ts` within 60 s and not before this process started, 6. nonce unseen in the ledger (kept, never
-evicted early, 4096 live nonces at most, then new frames are refused), 7. a wall clock that moves
+evicted early, until `ts + 60 s` **inclusive**: it is deleted only when strictly older, the same
+millisecond the timestamp window still accepts; 4096 live nonces at most, then new frames are refused),
+7. a wall clock that moves
 backwards by more than 60 s freezes the service until restart. Then actor in policy, capability
 known, tier equal to the table (no downgrade), capability enabled, typed arguments, allowlists, board
 data (classification, card state), lock, idempotency claim plus rate limits (one ledger transaction),
@@ -201,7 +240,17 @@ was taken.
 - **`armed`** in `action.state` is false while locked or after a clock jump; `lockedBy` is `system`
   for the latter.
 - **Policy `limits`** appear in `action.policy` as `{perMinute?, perHour?, perTargetCount?, perTargetSeconds?}`.
-- **Actors** must be version 4 UUIDs in the policy (the contract only says UUID).
+- **Actors** must be version 4 UUIDs in the policy (the contract only says UUID). The one exception is
+  the QA-only `--dev-offline-actors` dry-run allowance above.
+- **Handshake.** After a valid `hello` a connection is *handshaking*: `ack`, `action.policy` and
+  `action.state` are sent as one uninterrupted sequence (serialised against the state / policy
+  broadcasters, which skip it), and only then does it become ready for requests. A lock or reload
+  that lands during the handshake is therefore delivered after, never in between.
+- **Queued work.** A request that was admitted can be answered `refused` at execution time with
+  "policy changed since the request was admitted" or one of the board mismatch messages (see
+  "Execution-time re-checks"); the contract's `refused` status already covers it.
+- **`action.state` text** (`lockReason`, `lockedBy`) is filtered by the privacy filter, so a secret
+  or e-mail address in a lock reason arrives as a placeholder.
 - **Executor failure** (non-zero exit, missing program) is `refused`; only a timeout is `unknown`.
 - **Permission look-alikes** (an `Approve`-like offered choice on a decision that is not labelled
   `PERMISSION`) are classified as permission, so a halt dressed as a question cannot be approved.
@@ -225,4 +274,7 @@ was taken.
     cd hermes-adapter && PYTHONPATH=. python3 -m unittest discover -s tests
 
 `tests/test_control_*.py` use temp directories, a fake `hermes` script that records its argv and the
-signed test client; the real `hermes` is never called.
+signed test client; the real `hermes` is never called. `tests/test_control_security_fixes.py` holds the
+regression tests of the independent security review (execution-time re-checks, queued work vs reload,
+lock latch, complete audit writes, lock-state privacy, nonce boundary, handshake ordering, and the
+`--dev-offline-actors` gate).

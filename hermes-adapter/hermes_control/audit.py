@@ -7,6 +7,7 @@ are never written: callers pass small dicts, and :func:`scrub` drops anything th
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -51,6 +52,7 @@ class Audit:
         self._seq = 0
         self._boot = secrets.token_hex(4)
         self._fd: int | None = None
+        self._need_newline = False
         self._unauth_last = 0.0
         self._unauth_suppressed = 0
         self._open()  # fail at start-up when the audit file cannot be written
@@ -89,11 +91,41 @@ class Audit:
                     self._open()
                 self._roll_if_needed()
                 assert self._fd is not None
-                os.write(self._fd, line)
-                os.fsync(self._fd)
+                if self._need_newline:  # a previous record was cut short and could not be removed: start a fresh line
+                    line = b"\n" + line
+                self._write_record(self._fd, line)
+                os.fsync(self._fd)  # only after the WHOLE record is written
+                self._need_newline = False
             except (OSError, AssertionError) as e:
                 raise AuditError(f"audit write failed ({getattr(e, 'strerror', None) or type(e).__name__})") from None
             return rid
+
+    def _write_record(self, fd: int, data: bytes) -> None:
+        """Write ALL of ``data``: loop over short writes and EINTR; no progress is an error (no audit, no action)."""
+        before = None
+        try:
+            before = os.fstat(fd).st_size
+        except OSError:
+            pass
+        done = 0
+        try:
+            while done < len(data):
+                try:
+                    n = os.write(fd, data[done:])
+                except InterruptedError:
+                    continue
+                if not isinstance(n, int) or n <= 0:
+                    raise OSError(errno.EIO, "audit write made no progress")
+                done += n
+        except OSError:
+            if done:  # a partial record is on disk: take it back out, or make sure the next record starts on a new line
+                try:
+                    if before is None:
+                        raise OSError
+                    os.ftruncate(fd, before)
+                except OSError:
+                    self._need_newline = True
+            raise
 
     # ---- api --------------------------------------------------------------------------------
     def write(self, event: str, **fields: Any) -> str:

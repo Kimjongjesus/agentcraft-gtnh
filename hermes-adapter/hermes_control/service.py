@@ -17,6 +17,7 @@ import concurrent.futures
 import hmac
 import logging
 import secrets
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,7 +30,7 @@ from hermes_adapter.wsserver import UpgradeRequest, WSClosed, WSConnection, serv
 from . import PROTOCOL_VERSION, classify, executors, frames, ledger as ledger_mod, policy as pol
 from . import board as board_mod
 from .audit import Audit, AuditError
-from .lock import LockFile, set_lock
+from .lock import LockFile, LockState, set_lock
 
 log = logging.getLogger("hermes_control")
 
@@ -64,7 +65,7 @@ class Conn:
     ws: WSConnection
     session: str
     challenge: str
-    state: str = "hello"  # hello -> ready
+    state: str = "hello"  # hello -> handshaking (ack / policy / state being sent) -> ready
     seq: int = 0
     bad: int = 0
     stamps: list[float] = field(default_factory=list)
@@ -111,6 +112,19 @@ def validate_bind(host: str, insecure_lan_bind: bool) -> None:
         raise ValueError("non-loopback bind needs --insecure-lan-bind (plaintext; prefer an SSH or VPN tunnel)")
 
 
+def is_loopback_bind(host: str) -> bool:
+    """True only for ``localhost`` or a loopback IP literal (used by the QA-only ``--dev-offline-actors`` gate)."""
+    import ipaddress
+
+    h = (host or "").strip()
+    if h.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(h.strip("[]")).is_loopback
+    except ValueError:
+        return False
+
+
 class ControlService:
     def __init__(
         self,
@@ -130,6 +144,7 @@ class ControlService:
         host: str = "127.0.0.1",
         port: int = 7879,
         max_connections: int = MAX_CONNECTIONS,
+        dev_offline_actors: bool = False,
     ) -> None:
         self.key = key
         self.policy = policy
@@ -145,14 +160,25 @@ class ControlService:
         self.access = access or AccessPolicy()
         self.host, self.port = host, port
         self.max_connections = max_connections
+        self.dev_offline_actors = dev_offline_actors  # QA only; cli.build() gates it on --dry-run + loopback
         self.reload_n = 0
         self.revision = self._revision()
         self.conns: set[Conn] = set()
         self.pending: dict[str, Pending] = {}
         self.frozen: str | None = None
+        # The in-memory lock latch (F3): set BEFORE the lock file is written; honoured by admission and the worker
+        # guard. Once the file is known to exist, the file is authoritative again (the terminal `unlock` removes it).
+        # A latch whose file could not be written stays until the process restarts. Nothing on the wire clears it.
+        self._latch: LockState | None = None
+        self._latch_persisted = False
+        self._latch_mu = threading.Lock()
+        # Serialises policy swaps against the worker's last authorisation check (F2).
+        self._auth_mu = threading.RLock()
+        # Serialises the initial ack/policy/state sequence against broadcasts (F10).
+        self._bcast_lock = asyncio.Lock()
         self._last_seen = self.clock()
         self._last_touch = 0.0
-        self._last_lock_state = self.lock.state()
+        self._last_lock_state = self.lock_state()
         self._server: asyncio.base_events.Server | None = None
         self._tasks: list[asyncio.Task[Any]] = []
         self._pool = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="control-exec")
@@ -168,12 +194,52 @@ class ControlService:
         return self.clock()
 
     def armed(self) -> bool:
-        return self.frozen is None and not self.lock.is_locked()
+        return self.frozen is None and not self.lock_is_set()
+
+    # ---- the lock (file + in-memory latch) ----------------------------------------------------
+    def lock_state(self) -> LockState:
+        """The effective Hermes-side lock: the file, or the in-memory latch while the file could not be written."""
+        st = self.lock.state()
+        with self._latch_mu:
+            if self._latch is None:
+                return st
+            if st.locked:
+                return st
+            if self._latch_persisted:  # the file existed and was removed: the terminal `unlock` ran
+                self._latch = None
+                return st
+            return self._latch  # persistence failed: stays locked until restart
+
+    def lock_is_set(self) -> bool:
+        return self.lock_state().locked
+
+    def _latch_lock(self, reason: str, by: str, now: int) -> None:
+        with self._latch_mu:
+            if self._latch is None:
+                self._latch = LockState(True, reason[:200], by[:64], now)
+                self._latch_persisted = False
+
+    def _persist_latch(self) -> tuple[bool, str]:
+        """Try to write the lock file for the latch. (persisted, error name). Never raises."""
+        with self._latch_mu:
+            latch = self._latch
+            if latch is None or self._latch_persisted:
+                return True, ""
+        try:
+            set_lock(self.lock, latch.reason, latch.by, latch.since)  # True created / False already there: either way it exists
+        except Exception as e:  # noqa: BLE001 - ENOSPC, EACCES, ...: the latch stays
+            return False, type(e).__name__
+        with self._latch_mu:
+            self._latch_persisted = True
+        return True, ""
 
     def state_body(self) -> dict[str, Any]:
-        st = self.lock.state()
+        st = self.lock_state()
+        reason = st.reason if st.locked else (self.frozen or "")
+        by = st.by if st.locked else "system"
+        # the whole string goes through the privacy filter first, the wire cap comes after (F7)
         return {"armed": self.frozen is None and not st.locked, "locked": st.locked or self.frozen is not None,
-                "lockReason": (st.reason if st.locked else (self.frozen or ""))[:200], "lockedBy": (st.by if st.locked else "system")[:64],
+                "lockReason": redact.clean(reason, 200), "lockedBy": redact.clean(by, 64),
                 "since": st.since if st.locked else 0}
 
     # ---- sending ------------------------------------------------------------------------------
@@ -205,15 +271,17 @@ class ControlService:
         })
 
     async def broadcast_state(self) -> None:
-        for c in list(self.conns):
-            if c.state == "ready":
-                await self.send(c, "action.state", self.state_body())
+        async with self._bcast_lock:
+            for c in list(self.conns):
+                if c.state == "ready":  # a connection still in its handshake is brought up to date by the handshake itself
+                    await self.send(c, "action.state", self.state_body())
 
     async def broadcast_policy(self) -> None:
-        for c in list(self.conns):
-            if c.state == "ready":
-                await self.send(c, "action.policy", self.policy.wire(self.revision, self.dry_run))
-                await self.send(c, "action.state", self.state_body())
+        async with self._bcast_lock:
+            for c in list(self.conns):
+                if c.state == "ready":
+                    await self.send(c, "action.policy", self.policy.wire(self.revision, self.dry_run))
+                    await self.send(c, "action.state", self.state_body())
 
     async def _close(self, conn: Conn, code: int = 1008, reason: str = "closing") -> None:
         if conn.closed:
@@ -382,11 +450,13 @@ class ControlService:
             self.audit.try_write("handshake-refused", peer=conn.peer, type=t)
             await self._close(conn, 1008, "handshake refused")
             return
-        conn.state = "ready"
+        conn.state = "handshaking"  # broadcasters skip it until ack, policy and state have all been sent
         self.audit.try_write("hello", peer=conn.peer, revision=self.revision, dryRun=self.dry_run)
-        await self.send(conn, "ack", {"result": {"features": ["action"]}})
-        await self.send(conn, "action.policy", self.policy.wire(self.revision, self.dry_run))
-        await self.send(conn, "action.state", self.state_body())
+        async with self._bcast_lock:  # the initial sequence cannot be interleaved with a broadcast
+            if (await self.send(conn, "ack", {"result": {"features": ["action"]}})
+                    and await self.send(conn, "action.policy", self.policy.wire(self.revision, self.dry_run))
+                    and await self.send(conn, "action.state", self.state_body())):
+                conn.state = "ready"  # requests are admitted only from here on, with current policy and state delivered
 
     # ---- requests -----------------------------------------------------------------------------
     def _stored_reply(self, row: dict[str, Any]) -> tuple[str, str, dict[str, str], str]:
@@ -436,7 +506,7 @@ class ControlService:
             prep, target = self.prepare(cap, cp, args)
         except Refuse as e:
             return await refuse(str(e))
-        if self.lock.is_locked():
+        if self.lock_is_set():
             return await refuse("write lock is set")
         now = self.now()
         if confirm:
@@ -463,7 +533,7 @@ class ControlService:
         except AuditError:
             self.ledger.finish(auuid, rid, ledger_mod.REFUSED, "refused", "audit log unavailable", {}, "", self.now())
             return await self.result(conn, rid, "refused", "audit log unavailable")
-        req = executors.ExecRequest(cap, args, auuid, aname, rid, pl, prep)
+        req = executors.ExecRequest(cap, args, auuid, aname, rid, pl, prep, self.revision)
         if confirm:
             await self.prompt(conn, p, req, dig, aid)
             return
@@ -496,7 +566,9 @@ class ControlService:
             # defence in depth: a permission halt can only ever be answered with Deny (policy cannot change this)
             if cls.kind == classify.PERMISSION and classify.norm(ans.choice) != "deny":
                 raise Refuse("permission halts can only be denied from the game")
-            return {"board": card["board"], "card": card["id"], "choice": ans.choice, "note": ans.note, "kind": cls.kind}, None
+            return {"board": card["board"], "card": card["id"], "choice": ans.choice, "note": ans.note, "kind": cls.kind,
+                    # what the worker re-checks right before the executor runs (F1): the SAME open decision, classified the same way
+                    "decision_id": dec["id"], "decision_event": dec.get("event"), "question": cls.question, "options": list(cls.options)}, None
         if cap == "card.create":
             if args["board"] not in cp.boards:
                 raise Refuse("board not allowed")
@@ -590,7 +662,7 @@ class ControlService:
                 return "policy changed since the prompt"
             if not self.check_clock():
                 return "service clock error: restart required"
-            if self.lock.is_locked():
+            if self.lock_is_set():
                 return "write lock is set"
             a = pend.args
             if a["board"] not in cp.boards or a["profile"] not in cp.profiles:
@@ -615,7 +687,7 @@ class ControlService:
         except AuditError:
             self.ledger.finish(auuid, rid, ledger_mod.REFUSED, "refused", "audit log unavailable", {}, "", self.now())
             return await self.result(conn, rid, "refused", "audit log unavailable")
-        req = executors.ExecRequest("card.dispatch", pend.args, pend.actor_uuid, pend.actor_name, rid, self.policy, pend.prep)
+        req = executors.ExecRequest("card.dispatch", pend.args, pend.actor_uuid, pend.actor_name, rid, self.policy, pend.prep, self.revision)
         task = asyncio.create_task(self.run_executor(conn, req, pend.digest, aid))
         conn.tasks.add(task)
         task.add_done_callback(conn.tasks.discard)
@@ -636,24 +708,102 @@ class ControlService:
         """The game-side lock was set. Fail-safe direction: accepted from any signed, well-formed frame."""
         actor, reason = p["actor"], p["reason"]
         self.drop_tokens(None)
-        was = self.lock.is_locked()
+        was = self.lock_is_set()
         made = False
+        persist_error = ""
         if self.policy.lock_sets_hermes_lock:
             by = f"game:{actor['name']}/{actor['uuid'][:8]}"
-            made = set_lock(self.lock, reason or "locked from the game", by, self.now())
+            # latch in memory FIRST: if the file cannot be written (ENOSPC, EACCES, ...) control still stays locked (F3)
+            self._latch_lock(reason or "locked from the game", by, self.now())
+            ok, persist_error = self._persist_latch()
+            made = ok and not was
         self.audit.try_write("game-lock", req=p["id"], actor=actor["uuid"], name=actor["name"], reason=reason,
                              actorKnown=actor["uuid"] in self.policy.actors, hermesLockSet=made, alreadyLocked=was,
                              policySetsLock=self.policy.lock_sets_hermes_lock)
+        if persist_error:
+            self.audit.try_write("game-lock-persist-failed", req=p["id"], error=persist_error, latched=True)
         await self.poll_state()
 
     # ---- executing ----------------------------------------------------------------------------
     def _guarded(self, ex: executors.Executor, req: executors.ExecRequest) -> executors.ExecResult:
-        """Runs in a worker thread, immediately before the executor: the lock is checked once more."""
-        if self.lock.is_locked():
+        """Runs in a worker thread, immediately before the executor.
+
+        The lock is checked once more, the board is read again and everything the request depended on is
+        re-validated (F1), and the request is re-authorised against the CURRENT policy (F2). The hermes CLI
+        has no conditional mutation, so a tiny window between this check and the CLI call remains (CONTROL.md).
+        """
+        if self.lock_is_set() or self.frozen:
             raise Locked()
-        if self.frozen:
-            raise Locked()
+        self._revalidate_board(req)
+        with self._auth_mu:  # a policy reload cannot slip in between this check and the start
+            self._reauthorize(req)
+            if self.lock_is_set() or self.frozen:
+                raise Locked()
         return ex.execute(req)
+
+    def _reauthorize(self, req: executors.ExecRequest) -> None:
+        """Queued work is judged by the policy in force NOW. Raises ExecRefused."""
+        pl = self.policy
+        if not req.revision or req.revision != self.revision:
+            raise executors.ExecRefused("policy changed since the request was admitted")
+        cap, a, prep = req.capability, req.args, req.prep
+        if req.actor_uuid not in pl.actors:
+            raise executors.ExecRefused("actor not allowed")
+        cp = pl.cap(cap)
+        if not cp.enabled:
+            raise executors.ExecRefused("capability disabled")
+        board = prep.get("board", a.get("board"))
+        ok = True
+        if cap in ("decision.answer", "card.create", "card.edit"):
+            ok = board in cp.boards
+        elif cap == "card.dispatch":
+            ok = board in cp.boards and a.get("profile") in cp.profiles
+        elif cap in ("agent.chat", "agent.ask"):
+            ok = a.get("agent") in cp.agents and bool(cp.toolsets)
+        elif cap == "service.restart":
+            ok = a.get("service") in pl.services
+        elif cap == "cron.run":
+            ok = a.get("job") in pl.jobs
+        if not ok:
+            raise executors.ExecRefused("name no longer allowed by the policy")
+
+    def _revalidate_board(self, req: executors.ExecRequest) -> None:
+        """Re-read the board and re-check what the confirmed / validated request depended on. Raises ExecRefused."""
+        cap, a, p = req.capability, req.args, req.prep
+        if cap == "card.dispatch":
+            card = self.reader.card(p["board"], p["card"])
+            if card is None:
+                raise executors.ExecRefused("card changed since the prompt")
+            if card["revision"] != p["card_rev"]:
+                raise executors.ExecRefused("card changed since the prompt")
+            if card.get("assignee") != (p.get("card_view") or {}).get("assignee"):
+                raise executors.ExecRefused("card assignee changed since the prompt")
+            if board_mod.is_running(card) or not board_mod.dispatchable(card):
+                raise executors.ExecRefused("card is no longer dispatchable")
+        elif cap == "card.edit":
+            card = self.reader.card(p["board"], p["card"])
+            if card is None:
+                raise executors.ExecRefused("card not found on an allowed board")
+            if "comment" not in a and board_mod.is_running(card):
+                raise executors.ExecRefused("card is running: only a comment is allowed")
+        elif cap == "decision.answer":
+            if self.reader.card(p["board"], p["card"]) is None:
+                raise executors.ExecRefused("card not found on an allowed board")
+            dec = self.reader.decision(p["board"], p["card"], a["decision"])
+            if dec is None:
+                raise executors.ExecRefused("that decision is not open any more")
+            if dec["id"] != p.get("decision_id") or dec.get("event") != p.get("decision_event"):
+                raise executors.ExecRefused("the decision changed since the request")
+            cls = classify.classify(dec["reason"], dec.get("blockKind"))
+            if cls.kind != p.get("kind") or list(cls.options) != p.get("options") or cls.question != p.get("question"):
+                raise executors.ExecRefused("the decision changed since the request")
+            ans = classify.resolve_answer(cls, a.get("choice"), a.get("text"), req.policy.cap(cap).handoff_answerable)
+            if not ans.ok:
+                raise executors.ExecRefused(ans.error)
+            if ans.choice != p.get("choice") or ans.note != p.get("note"):
+                raise executors.ExecRefused("the decision changed since the request")
+            if cls.kind == classify.PERMISSION and classify.norm(ans.choice) != "deny":
+                raise executors.ExecRefused("permission halts can only be denied from the game")
 
     async def run_executor(self, conn: Conn, req: executors.ExecRequest, dig: str, aid: str) -> None:
         loop = asyncio.get_running_loop()
@@ -696,7 +846,8 @@ class ControlService:
     # ---- background ---------------------------------------------------------------------------
     async def poll_state(self) -> None:
         """Push action.state when the lock (or the clock) changed; a new lock voids confirm tokens."""
-        cur = (self.lock.state(), self.frozen)
+        self._persist_latch()  # a latch whose file could not be written is retried; it never clears by itself
+        cur = (self.lock_state(), self.frozen)
         prev = (self._last_lock_state, getattr(self, "_last_frozen", None))
         if cur != prev:
             self._last_lock_state, self._last_frozen = cur
@@ -736,14 +887,15 @@ class ControlService:
         if self.policy_path is None:
             return False
         try:
-            new = pol.load(self.policy_path)
+            new = pol.load(self.policy_path, allow_offline=self.dev_offline_actors)
         except pol.PolicyError as e:
             self.audit.try_write("policy-reload-failed", reason=str(e))
             log.error("policy reload refused: %s", e)
             return False
-        self.policy = new
-        self.reload_n += 1
-        self.revision = self._revision()
+        with self._auth_mu:  # swap + revision bump are one step as seen by a worker about to start queued work
+            self.policy = new
+            self.reload_n += 1
+            self.revision = self._revision()
         self.drop_tokens(None)
         self.audit.try_write("policy-reload", revision=self.revision)
         return True
@@ -764,7 +916,8 @@ class ControlService:
         sock = self._server.sockets[0].getsockname() if self._server.sockets else (self.host, self.port)
         self.port = sock[1]
         self._tasks = [asyncio.create_task(self.tick_loop())]
-        self.audit.try_write("start", host=self.host, port=self.port, revision=self.revision, dryRun=self.dry_run, protocol=PROTOCOL_VERSION)
+        self.audit.try_write("start", host=self.host, port=self.port, revision=self.revision, dryRun=self.dry_run, protocol=PROTOCOL_VERSION,
+                             devOfflineActors=self.dev_offline_actors)
         return self.port
 
     async def stop(self) -> None:

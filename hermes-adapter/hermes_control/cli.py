@@ -22,7 +22,7 @@ from . import executors, frames, policy as pol, safety
 from .audit import Audit, AuditError
 from .ledger import Ledger, LedgerError
 from .lock import LockFile, clear_lock
-from .service import ControlService, validate_bind
+from .service import ControlService, is_loopback_bind, validate_bind
 
 log = logging.getLogger("hermes_control")
 
@@ -58,9 +58,16 @@ def build(args: argparse.Namespace, allow_in_repo: bool = False, clock: Any = No
         raise StartupRefused(str(e)) from None
     if args.board_fixture and not args.dry_run:
         raise StartupRefused("--board-fixture is allowed only together with --dry-run")
+    dev_offline = bool(getattr(args, "dev_offline_actors", False))
+    if dev_offline:
+        # QA only: offline (version 3) actor UUIDs for a loopback dry run against a dev game server. Never in a real setup.
+        if not args.dry_run:
+            raise StartupRefused("--dev-offline-actors is allowed only together with --dry-run")
+        if not is_loopback_bind(args.bind):
+            raise StartupRefused("--dev-offline-actors is allowed only on a loopback bind")
     policy_path = Path(args.policy).expanduser()
     try:
-        policy = pol.load(policy_path)
+        policy = pol.load(policy_path, allow_offline=dev_offline)
     except pol.PolicyError as e:
         raise StartupRefused(f"policy: {e}") from None
     try:
@@ -104,6 +111,7 @@ def build(args: argparse.Namespace, allow_in_repo: bool = False, clock: Any = No
     return ControlService(
         key=key, policy=policy, policy_path=policy_path, ledger=ledger, audit=audit, lock=LockFile(lockp), reader=reader,
         executor_map=executors.build(args.dry_run), clock=clock, dry_run=args.dry_run, access=access, host=args.bind, port=args.port,
+        dev_offline_actors=dev_offline,
     )
 
 
@@ -115,7 +123,8 @@ async def serve_forever(svc: ControlService) -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, stop.set)
     caps = [n for n, c in svc.policy.caps.items() if c.enabled]
-    print(f"hermes_control listening on ws://{svc.host}:{svc.port}/ dryRun={svc.dry_run} policy={svc.revision} enabled={caps or 'none'}", file=sys.stderr, flush=True)
+    print(f"hermes_control listening on ws://{svc.host}:{svc.port}/ dryRun={svc.dry_run} policy={svc.revision} enabled={caps or 'none'}"
+          + (" DEV-OFFLINE-ACTORS (QA only)" if svc.dev_offline_actors else ""), file=sys.stderr, flush=True)
     await stop.wait()
     await svc.stop()
 
@@ -140,6 +149,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     s.add_argument("--allow-host", action="append", default=[], help="extra accepted Host header value (repeatable)")
     s.add_argument("--dry-run", action="store_true", help="replace every executor with a mock that records and executes nothing")
     s.add_argument("--board-fixture", default=None, help="JSON of cards and decisions used instead of the Hermes board (needs --dry-run)")
+    s.add_argument("--dev-offline-actors", action="store_true",
+                   help="QA ONLY: let the policy name offline (version 3) actor UUIDs. Refused unless --dry-run is given and the bind is loopback; audited at start")
     s.add_argument("--hermes-home", default=None, help="Hermes home for board reads (default: the global Hermes home)")
     s.add_argument("-v", "--verbose", action="store_true")
     k = sub.add_parser("lock", help="set the Hermes-side write lock")
