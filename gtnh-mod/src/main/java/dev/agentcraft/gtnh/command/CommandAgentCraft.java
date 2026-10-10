@@ -63,7 +63,7 @@ import dev.agentcraft.gtnh.state.HqData;
  */
 public class CommandAgentCraft extends CommandBase {
 
-    private static final String USAGE = "/agentcraft <status|agents|board|ops|anchor|bind|give|edit|toast|cap|help>";
+    private static final String USAGE = "/agentcraft <status|agents|board|ops|anchor|bind|give|edit|toast|cap|write|help>";
 
     @Override
     public String getCommandName() {
@@ -132,6 +132,16 @@ public class CommandAgentCraft extends CommandBase {
             case "ops":
                 ops(sender);
                 return;
+            case "write": {
+                // add-on hook: without an add-on jar this server stays read-only
+                dev.agentcraft.gtnh.api.Extensions.ServerHooks h = dev.agentcraft.gtnh.api.Extensions.server;
+                if (h == null) {
+                    say(sender, "\u00a7e[AgentCraft] no write add-on is installed: this server only reads from Hermes");
+                    return;
+                }
+                h.command(sender, java.util.Arrays.copyOfRange(args, 1, args.length));
+                return;
+            }
             case "help":
                 help(sender);
                 return;
@@ -158,6 +168,7 @@ public class CommandAgentCraft extends CommandBase {
         say(s, " edit snapshot save|diff|restore <name> | snapshot list");
         say(s, " edit preset list | preset <name> [add|replace] | import <name> [add|replace] | imports");
         say(s, " edit export <name> [radius] [keep] | apply <token>   (presets/imports are dry runs until applied)");
+        say(s, "\u00a76 write status|verify|lock|unlock|audit   only with the write add-on jar installed");
     }
 
     private static void board(ICommandSender sender) {

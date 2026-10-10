@@ -66,6 +66,11 @@ public final class EditEngine {
             return new Result(false, m);
         }
 
+        /** A refusal made outside the engine (an add-on's lock). */
+        public static Result refused(String m) {
+            return new Result(false, m);
+        }
+
         @Override
         public String toString() {
             return (ok ? "OK " : "REFUSED ") + message + (lines.isEmpty() ? "" : " " + lines);

@@ -48,7 +48,18 @@ public class GuiDecisions extends GuiScreen {
             .lineHeight(Widgets.H1) + 8;
         float split = Math.max(170, Math.min(width * 0.42F, 280));
         list.bounds(pad, top + 10, split, height - pad - 12);
-        reader.bounds(split + 8, top, width - pad, height - pad - 12);
+        reader.bounds(split + 8, top, width - pad, height - pad - 12 - footerH());
+    }
+
+    /** Add-on footer strip under the reader (0 without an add-on: the screen stays read-only). */
+    private static float footerH() {
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks h = dev.agentcraft.gtnh.api.Extensions.client;
+        return h == null ? 0 : Math.max(0, Math.min(h.footerHeight("decisions"), 60));
+    }
+
+    private DecisionData.Decision selectedDecision() {
+        for (DecisionData.Decision d : ClientOps.decisions) if (d.id.equals(selectedId)) return d;
+        return null;
     }
 
     private List<DecisionData.Decision> newestFirst() {
@@ -65,10 +76,12 @@ public class GuiDecisions extends GuiScreen {
         float pad = 8;
         List<DecisionData.Decision> ds = newestFirst();
         float tw = heavy.draw("Waiting on you", pad, pad, Widgets.H1, 0xFF000000 | th.text);
-        reg.draw(ds.size() + (ds.size() == 1 ? " open decision" : " open decisions") + "  \u00b7  read-only: answer outside the game for now", pad + tw + 8, pad + 3,
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks hooks = dev.agentcraft.gtnh.api.Extensions.client;
+        String hookNote = hooks == null ? null : hooks.statusLine("decisions");
+        reg.draw(ds.size() + (ds.size() == 1 ? " open decision" : " open decisions") + "  \u00b7  " + (hookNote != null ? hookNote : "read-only: answer outside the game for now"), pad + tw + 8, pad + 3,
             Widgets.BODY, 0xFF000000 | th.muted);
         if (!ClientOps.decisionsLive) Ui.pillRight(reg, "adapter offline", width - pad, pad + 1, Widgets.SMALL, th.danger);
-        reg.draw("Answering from the game comes in a later card. Esc closes.", pad, height - pad - reg.lineHeight(Widgets.SMALL), Widgets.SMALL,
+        reg.draw(hookNote != null ? "Esc closes." : "Answering from the game comes in a later card. Esc closes.", pad, height - pad - reg.lineHeight(Widgets.SMALL), Widgets.SMALL,
             0xFF000000 | th.muted);
         DecisionData.Decision sel = null;
         for (DecisionData.Decision d : ds) if (d.id.equals(selectedId)) sel = d;
@@ -119,6 +132,10 @@ public class GuiDecisions extends GuiScreen {
             0xFF000000 | th.muted);
         Ui.round(reader.x0, reader.y0, reader.x1, reader.y1, 4, 0xFF000000 | th.surface);
         if (sel != null) drawReader(sel, now);
+        float fh = footerH();
+        if (fh > 0) {
+            dev.agentcraft.gtnh.api.Extensions.client.drawFooter("decisions", sel, reader.x0, reader.y1 + 2, reader.x1, reader.y1 + fh, mx, my);
+        }
     }
 
     private void drawReader(DecisionData.Decision d, long now) {
@@ -174,6 +191,10 @@ public class GuiDecisions extends GuiScreen {
     @Override
     protected void mouseClicked(int mx, int my, int button) {
         super.mouseClicked(mx, my, button);
+        float fh = footerH();
+        if (fh > 0 && mx >= reader.x0 && mx <= reader.x1 && my >= reader.y1 + 2 && my <= reader.y1 + fh) {
+            if (dev.agentcraft.gtnh.api.Extensions.client.footerClick("decisions", selectedDecision(), reader.x0, reader.y1 + 2, reader.x1, reader.y1 + fh, mx, my, button)) return;
+        }
         if (!list.contains(mx, my)) return;
         for (Object[] r : rows) {
             float y0 = list.y0 + (Float) r[1] - list.offset, y1 = list.y0 + (Float) r[2] - list.offset;
