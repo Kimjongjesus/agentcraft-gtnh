@@ -27,6 +27,9 @@ this harness does not arm it, add an action module, or change the adapter's read
 - Snapshot the **full server tree**, not merely `world/`: dimensions, player data, machine NBT,
   configs, mods, properties, identity lists, and other files required for reproducibility.
   Snapshots are permitted only after a clean stop and confirmed process exit.
+- Any directory-enumeration error aborts import, snapshot, reset or verification. Unreadable
+  subtrees are never treated as empty. Failed partial copies remain for inspection, without
+  a completed snapshot manifest or active-generation switch.
 - Reset copies a named snapshot into another **new generation**, verifies it, then switches
   the active generation. Preserve the previous generation and snapshot for inspection.
   No in-place restore, deletion, pruning, or automatic retention cleanup is authorized.
@@ -156,6 +159,16 @@ enable-query=false
 server-ip=127.0.0.1
 server-port=25575
 ```
+
+Both `server.properties` and `eula.txt` must use the harness's deliberately strict Java
+Properties subset: ASCII keys matching `[A-Za-z0-9_.-]+` immediately followed by `=`,
+and printable ASCII values without leading/trailing spaces. Empty values and literal
+spaces, `:` and `=` inside values are allowed. CR, LF and CRLF line endings, blank lines,
+and comments beginning with `#` or `!` after optional space/tab/form-feed indentation are
+supported. Duplicate keys, colon/whitespace separators, escapes, continuations and other
+non-ASCII/control characters in entries are refused rather than normalized. The harness
+does not rewrite copied files to make them pass. Any approved compatibility edits belong
+only in the stopped disposable generation; preserve the source and prior generations.
 
 `25575` is an example isolated nonproduction port, **not a verified free port**. Select and
 verify a free port different from the production server; retain the loopback bind. Never broaden

@@ -22,10 +22,36 @@ not passed. This follows the latest authorization for local work only.
 
 ## Verified locally
 
-Parent reran `python3 -m unittest discover -s tools/test-world/tests -v`:
-44 tests passed in 12.271 seconds, exit code 0. `git diff --check` passed. Python syntax
-checks and focused public-safety scans passed. All eight README operation examples parsed
-with the real CLI parser (placeholder targets were not executed).
+Parent reran `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tools/test-world/tests -v`:
+56 tests passed in 19.078 seconds, exit code 0, with no skips. This supersedes the earlier
+44-test receipt. `git diff --check` passed. The original candidate's eight README operation
+examples are unchanged; no placeholder targets were executed.
+Parent also ran the new mid-enumeration and property-alias regressions against the original
+candidate loaded in memory: both fail there and pass against this revision (zero errors or
+skips in the focused negative-control run). No old candidate files were overwritten.
+
+## Review-blocker fixes
+
+- Tree inventory now aborts on every reported walk/enumeration error instead of silently
+  omitting a subtree. Regressions exercise injected permission, missing-directory, I/O and
+  mid-iteration errors, plus real current-user mode-000 permission denial. Import, snapshot,
+  reset and verify are covered at each inventory phase, including after copying. Assertions
+  check no completed snapshot/import publication or active switch, preservation of source,
+  snapshots and previous generations, and retention of failed partial copies.
+- Properties parsing now accepts an explicit unambiguous ASCII `key=value` subset, with only
+  Java natural line endings and leading indentation rules. Colon/whitespace aliases, duplicate
+  keys, escapes, continuations and Python-only whitespace/line-break ambiguities are refused.
+  Preflight/start regressions cover online mode, whitelist, bind, port, world path and EULA;
+  they assert no fork, no run publication and unchanged server/source/control contents.
+  The stricter compatibility limits are documented in the runbook; no automatic rewriting.
+
+## Run target
+
+Local CLI/synthetic verification only: from the repository root run the unittest command
+above, or `python3 tools/test-world/harness.py --help`. There is no web application preview
+for this deliverable. Do not use the unrelated `tools/package.json` as a launch target.
+No real server launch target is approved; live boot, client access and world mutation remain
+deferred to a separately authorized window.
 
 Tests exercise synthetic snapshot/change/reset/exact comparison, source and displaced-copy
 preservation, path/link attacks, corrupt copies, lifecycle locks, cgroup budgets, guard
@@ -59,14 +85,14 @@ No unrelated adapter/UI/Java builds were run because those modules are unchanged
   operator investigation, not deleting records or inventing a clean-stop receipt.
 - Loopback-only networking requires an approved local client or separately approved access
   method. Online UUID ownership and successful authentication still need live verification.
-- The required before/after test timing helpers were attempted, but rejected the execution
-  context as a delegated-child board mutation. No timing marker success is claimed and no
-  guard was bypassed. This workflow integration limitation needs intake attention.
+- Workflow timing/demo registration is separate from verification of the code. Any rejected
+  helper command is reported in the private task handoff, never treated as permission or
+  successful registration, and never bypassed.
 
 ## Decisions needed before live acceptance
 
-1. Decide whether to send this local-code candidate for the independent review requested by
-   the task. The builder has not self-approved, pushed, merged or deployed it.
+1. Decide whether to send this revised local-code candidate back for independent review of
+   the two blocker fixes. The builder has not self-approved, pushed, merged or deployed it.
 2. Approve an idle test window and the specific remote commands/configuration/mutations.
    Recheck memory and gaming/job activity first; stop on any failed guard.
 3. Confirm the disposable source, verified online account, reviewed launch jar/argument file,

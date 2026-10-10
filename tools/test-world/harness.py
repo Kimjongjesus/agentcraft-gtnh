@@ -154,10 +154,14 @@ def active(root):
 
 
 def tree_manifest(root):
-    """Hash every file and include empty directories; follow no links."""
+    """Hash every file/empty directory without links; abort on enumeration errors."""
     require(stat.S_ISDIR(root.lstat().st_mode), 'tree root must be a directory')
     result = {}
-    for base, dirs, files in os.walk(root, followlinks=False):
+    def enumeration_error(error):
+        # os.walk otherwise silently skips unreadable/disappearing subtrees,
+        # letting both source and copy "verify" against incomplete manifests.
+        raise error
+    for base, dirs, files in os.walk(root, followlinks=False, onerror=enumeration_error):
         for name in sorted(dirs + files):
             p = Path(base) / name
             s = p.lstat()
@@ -459,15 +463,28 @@ def verify(root, name):
 
 
 def plain_properties(path):
+    """Read an intentionally strict, unambiguous subset of Java properties.
+
+    ISO-8859-1 bytes use only CR, LF or CRLF natural line endings, not Python's
+    broader Unicode splitlines. Blank/comment lines and leading Java whitespace
+    (space, tab, form feed) are allowed. Entries must be key=value: ASCII keys
+    [A-Za-z0-9_.-]+ immediately followed by '='; values are printable ASCII with
+    no surrounding spaces. No escapes, continuations, alternative separators,
+    whitespace within keys, or duplicate keys are supported. Values may contain
+    literal ':' and '='. Never normalize unsupported syntax into a safe key.
+    """
     regular(path)
     result = {}
-    for line in path.read_text(encoding='iso-8859-1').splitlines():
-        line = line.strip()
+    for line in re.split(r'\r\n|\r|\n', path.read_bytes().decode('iso-8859-1')):
+        line = line.lstrip(' \t\f')
         if not line or line.startswith(('#', '!')):
             continue
-        # Java properties escaping/continuations are deliberately not guessed.
         require('\\' not in line and '=' in line, 'use plain unescaped key=value properties')
-        key, value = (s.strip() for s in line.split('=', 1))
+        key, value = line.split('=', 1)
+        require(re.fullmatch(r'[A-Za-z0-9_.-]+', key),
+                'properties keys must be plain ASCII followed immediately by =')
+        require(all(' ' <= char <= '~' for char in value) and value == value.strip(' '),
+                'properties values must be printable ASCII without surrounding spaces')
         require(key not in result, 'duplicate properties key refused')
         result[key] = value
     return result

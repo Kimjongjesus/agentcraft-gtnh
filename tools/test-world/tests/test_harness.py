@@ -1,6 +1,7 @@
 """Synthetic-only tests. No Minecraft, remote host, or real world is accessed."""
 import argparse
 import contextlib
+import errno
 import importlib.util
 import io
 import json
@@ -274,6 +275,173 @@ class HarnessTests(unittest.TestCase):
         self.assertFalse((self.root / h.MARKER).exists())
         self.assertTrue((self.root / 'generations').exists())
 
+    def assert_enumeration_failure(self, operation, phase, nested, error=None):
+        """Fail one real walk, not a mocked manifest, at a lifecycle phase."""
+        self.enumeration_case = getattr(self, 'enumeration_case', 0) + 1
+        root = self.base / ('enumeration-case-%d' % self.enumeration_case)
+        real_manifest, real_scandir = h.tree_manifest, os.scandir
+        source_before = real_manifest(self.source)
+        if operation != 'import':
+            h.initialize(argparse.Namespace(root=str(root), source=str(self.source), ack_disposable=True))
+            if operation in ('reset', 'verify'):
+                h.snapshot(root, 'baseline')
+        old_generations = list((root / 'generations').iterdir()) if root.exists() else []
+        old_trees = {p: real_manifest(p) for p in old_generations}
+        active_before = (root / 'active.json').read_bytes() if root.exists() else None
+        baseline = root / 'snapshots' / 'baseline'
+        baseline_before = real_manifest(baseline) if baseline.exists() else None
+        calls, failures = 0, 0
+
+        def manifest(path):
+            nonlocal calls, failures
+            calls += 1
+            if calls != phase:
+                return real_manifest(path)
+            blocked = path / 'world' / 'DIM42' if nested else path
+            if error is None:
+                # Current-user real permission denial; never switch users.
+                mode = stat.S_IMODE(blocked.stat().st_mode)
+                blocked.chmod(0o000)
+                try:
+                    failures += 1
+                    return real_manifest(path)
+                finally:
+                    blocked.chmod(mode)
+
+            def scandir(target):
+                nonlocal failures
+                if Path(target) == blocked:
+                    failures += 1
+                    number = {PermissionError: errno.EACCES, FileNotFoundError: errno.ENOENT}.get(error, errno.EIO)
+                    raise error(number, 'synthetic enumeration failure', str(target))
+                return real_scandir(target)
+            with mock.patch.object(h.os, 'scandir', side_effect=scandir):
+                return real_manifest(path)
+
+        with mock.patch.object(h, 'tree_manifest', side_effect=manifest):
+            with self.assertRaises(OSError):
+                if operation == 'import':
+                    h.initialize(argparse.Namespace(root=str(root), source=str(self.source), ack_disposable=True))
+                else:
+                    {'snapshot': h.snapshot, 'reset': h.reset, 'verify': h.verify}[operation](
+                        root, 'failed' if operation == 'snapshot' else 'baseline')
+        self.assertEqual(calls, phase, 'must abort at the failing enumeration')
+        self.assertEqual(failures, 1, 'must exercise the targeted scandir')
+        self.assertEqual(real_manifest(self.source), source_before)
+        for generation, before in old_trees.items():
+            self.assertEqual(real_manifest(generation), before, 'old generation must be preserved')
+        if baseline_before is not None:
+            self.assertEqual(real_manifest(baseline), baseline_before)
+        if operation == 'import':
+            self.assertFalse((root / h.MARKER).exists())
+            self.assertFalse((root / 'active.json').exists())
+            if phase == 1:
+                self.assertFalse(root.exists())
+                return
+        else:
+            self.assertEqual((root / 'active.json').read_bytes(), active_before)
+        new_generations = set((root / 'generations').iterdir()) - set(old_generations)
+        for generation in new_generations:
+            self.assertFalse((generation / 'import-manifest.json').exists())
+        if operation == 'snapshot':
+            partial = root / 'snapshots' / 'failed'
+            self.assertTrue(partial.is_dir())
+            self.assertFalse((partial / 'manifest.json').exists())
+            destination = partial / 'server'
+            copy_finished = phase >= 2
+            self.assertFalse(new_generations)
+        elif operation in ('import', 'reset') and (operation == 'import' or phase >= 2):
+            self.assertEqual(len(new_generations), 1)
+            destination = next(iter(new_generations)) / 'server'
+            copy_finished = phase >= 3
+        else:
+            self.assertFalse(new_generations)
+            return
+        if copy_finished:
+            self.assertTrue(destination.is_dir(), 'failed copy must not be deleted')
+            self.assertEqual(real_manifest(destination), source_before,
+                             'retain all copied files even when later verification fails')
+        else:
+            self.assertFalse(destination.exists(), 'initial walk must fail before copying')
+
+    def enumeration_matrix(self, operation, phases, real_permissions=False):
+        if real_permissions:
+            probe = self.base / 'permission-probe'
+            probe.mkdir()
+            probe.chmod(0o000)
+            try:
+                try:
+                    with os.scandir(probe) as entries:
+                        list(entries)
+                except PermissionError:
+                    pass
+                else:
+                    self.skipTest('current-user privileges bypass mode-000 scandir denial')
+            finally:
+                probe.chmod(0o700)
+        for phase in phases:
+            for nested in (False, True):
+                for error in ((None,) if real_permissions else (PermissionError, FileNotFoundError, OSError)):
+                    with self.subTest(operation=operation, phase=phase, nested=nested, error=error):
+                        self.assert_enumeration_failure(operation, phase, nested, error)
+
+    def test_import_scandir_errors_abort_all_manifest_phases(self):
+        # Initial inspection, copy-before, source-after, destination-after.
+        self.enumeration_matrix('import', range(1, 5))
+
+    def test_snapshot_scandir_errors_abort_all_manifest_phases(self):
+        self.enumeration_matrix('snapshot', range(1, 4))
+
+    def test_reset_scandir_errors_abort_all_manifest_phases(self):
+        # Snapshot-before, copy-before/source-after/dest-after, snapshot-after.
+        self.enumeration_matrix('reset', range(1, 6))
+
+    def test_verify_scandir_errors_abort_both_trees(self):
+        self.enumeration_matrix('verify', range(1, 3))
+
+    def test_import_real_permission_denial_at_all_manifest_phases(self):
+        self.enumeration_matrix('import', range(1, 5), real_permissions=True)
+
+    def test_snapshot_real_permission_denial_at_all_manifest_phases(self):
+        self.enumeration_matrix('snapshot', range(1, 4), real_permissions=True)
+
+    def test_reset_real_permission_denial_at_all_manifest_phases(self):
+        self.enumeration_matrix('reset', range(1, 6), real_permissions=True)
+
+    def test_verify_real_permission_denial_in_both_trees(self):
+        self.enumeration_matrix('verify', range(1, 3), real_permissions=True)
+
+    def test_scandir_iteration_error_cannot_return_partial_manifest(self):
+        real_scandir = os.scandir
+        for blocked in (self.source, self.source / 'world' / 'DIM42'):
+            class BrokenIterator:
+                def __init__(self, iterator):
+                    self.iterator = iterator
+                    self.read = False
+
+                def __enter__(self):
+                    self.iterator.__enter__()
+                    return self
+
+                def __exit__(self, *args):
+                    return self.iterator.__exit__(*args)
+
+                def __iter__(self):
+                    return self
+
+                def __next__(self):
+                    if self.read:
+                        raise OSError(errno.EIO, 'synthetic mid-enumeration failure')
+                    self.read = True
+                    return next(self.iterator)
+
+            def scandir(path):
+                iterator = real_scandir(path)
+                return BrokenIterator(iterator) if Path(path) == blocked else iterator
+            with self.subTest(blocked=blocked), mock.patch.object(h.os, 'scandir', side_effect=scandir):
+                with self.assertRaises(OSError):
+                    h.tree_manifest(self.source)
+
     def test_guard_fails_closed_and_idle_not_bypass(self):
         ident = {'pid': 99999999, 'starttime': 10, 'boot_id': 'synthetic'}
         for name in ('java', 'steam', 'gradle', 'codex', 'python3.11', 'node', 'custom-game'):
@@ -384,6 +552,88 @@ class HarnessTests(unittest.TestCase):
                 (server / 'server.properties').write_text(properties)
                 with self.assertRaises(h.Refused):
                     h.launch_config(self.start_args(), self.root)
+
+    def assert_properties_rejected_without_launch_or_writes(self, server):
+        server_before = h.tree_manifest(server)
+        source_before = h.tree_manifest(self.source)
+        root_before = h.tree_manifest(self.root)
+        for command in ('preflight', 'start'):
+            argv = [command, '--root', str(self.root), '--java', str(self.fake),
+                    '--jar', 'server.jar', '--xms', '16M', '--xmx', '32M', '--idle-confirmed']
+            with self.subTest(command=command), \
+                    mock.patch.object(h.os, 'fork', side_effect=AssertionError('must not launch')) as fork, \
+                    mock.patch.object(h, 'guard') as guard, \
+                    mock.patch.object(h, 'port_open') as port, \
+                    contextlib.redirect_stdout(io.StringIO()) as out, \
+                    contextlib.redirect_stderr(io.StringIO()) as err:
+                self.assertEqual(h.main(argv), 1)
+                self.assertFalse(json.loads(err.getvalue())['ok'])
+                self.assertEqual(out.getvalue(), '')
+                fork.assert_not_called()
+                guard.assert_not_called()
+                port.assert_not_called()
+            self.assertEqual(h.tree_manifest(server), server_before)
+            self.assertEqual(h.tree_manifest(self.source), source_before)
+            self.assertEqual(h.tree_manifest(self.root), root_before)
+            self.assertFalse((self.root / 'current-run.json').exists())
+            self.assertEqual(list((self.root / 'runs').iterdir()), [])
+
+    def test_properties_aliases_and_duplicates_refuse_preflight_and_start(self):
+        server = self.init()
+        properties = (server / 'server.properties').read_bytes() + b'level-name=world\n'
+        eula = (server / 'eula.txt').read_bytes()
+        for key, unsafe in (('online-mode', 'false'), ('white-list', 'false'),
+                            ('server-ip', '0.0.0.0'), ('server-port', '1'),
+                            ('level-name', '../../outside'), ('eula', 'false')):
+            escaped_key = r'\u%04x' % ord(key[0]) + key[1:]
+            aliases = (key + ':' + unsafe + '=ignored', key + ' ' + unsafe + '=ignored',
+                       key + '\t' + unsafe + '=ignored', key + '\f' + unsafe + '=ignored',
+                       key + ' :' + unsafe + '=ignored', key + ':' + unsafe,
+                       key + ' ' + unsafe, key + ' =' + unsafe, key + '= ' + unsafe,
+                       escaped_key + '=' + unsafe, key + r'\=alias=' + unsafe,
+                       key + '=' + unsafe, ' \t\f' + key + '=' + unsafe)
+            for alias in aliases:
+                with self.subTest(key=key, alias=alias):
+                    (server / 'server.properties').write_bytes(properties)
+                    (server / 'eula.txt').write_bytes(eula)
+                    target = server / ('eula.txt' if key == 'eula' else 'server.properties')
+                    with target.open('ab') as f:
+                        f.write(alias.encode('ascii') + b'\n')
+                    self.assert_properties_rejected_without_launch_or_writes(server)
+
+    def test_properties_nonjava_whitespace_and_line_breaks_refuse_launch(self):
+        server = self.init()
+        properties = (server / 'server.properties').read_bytes()
+        eula = (server / 'eula.txt').read_bytes()
+        for filename, original, key in (('server.properties', properties, b'online-mode'),
+                                        ('eula.txt', eula, b'eula')):
+            for char in (b'\v', b'\x1c', b'\x1d', b'\x1e', b'\x85', b'\xa0', b'\x00'):
+                for payload in (char + key + b'=true\n', key + b'=true' + char + b'\n',
+                                key + b'=true' + char + key + b':false=ignored\n'):
+                    with self.subTest(filename=filename, payload=payload):
+                        (server / 'server.properties').write_bytes(properties)
+                        (server / 'eula.txt').write_bytes(eula)
+                        (server / filename).write_bytes(original.replace(key + b'=true\n', payload))
+                        self.assert_properties_rejected_without_launch_or_writes(server)
+
+    def test_plain_properties_documented_subset_and_literal_values(self):
+        path = self.base / 'plain.properties'
+        for ending in (b'\n', b'\r', b'\r\n'):
+            path.write_bytes(ending.join((b' \t\f# comment', b'\f! comment', b' \t\f',
+                                          b' \t\fonline-mode=true', b'empty=',
+                                          b'motd=literal : and = in value', b'key_1.name=value', b'')))
+            with self.subTest(ending=ending):
+                self.assertEqual(h.plain_properties(path),
+                                 {'online-mode': 'true', 'empty': '',
+                                  'motd': 'literal : and = in value', 'key_1.name': 'value'})
+        for payload in (b'key=value \n', b'key=value\t\n', b'key=value\f\n',
+                        b'key=\\u0076alue\n', b'key=value\\\ncontinued=other\n',
+                        b'key=value\n \t\fkey=other\n', b'key\t=value\n',
+                        b'key\f=value\n', b'key:value\n', b'key value\n',
+                        'key=value\u2028other=ignored\n'.encode('utf-8')):
+            path.write_bytes(payload)
+            with self.subTest(payload=payload), self.assertRaises(h.Refused):
+                h.plain_properties(path)
 
     def test_isolation_properties_and_manual_eula_required_without_writes(self):
         server = self.init()
