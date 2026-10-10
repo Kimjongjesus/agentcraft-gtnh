@@ -332,6 +332,8 @@ public class GuiTaskWall extends GuiScreen {
 
     @Override
     protected void keyTyped(char ch, int key) {
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks hk = dev.agentcraft.gtnh.api.Extensions.client;
+        if (hk != null && footerH() > 0 && hk.footerKey("taskwall", selectedId == null ? null : ClientHq.task(selectedId), ch, key)) return;
         super.keyTyped(ch, key);
         if (key == Keyboard.KEY_DOWN) detail.wheel(-1, 10);
         if (key == Keyboard.KEY_UP) detail.wheel(1, 10);

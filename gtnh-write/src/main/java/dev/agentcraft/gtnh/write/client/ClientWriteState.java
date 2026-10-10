@@ -8,6 +8,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 
 import dev.agentcraft.gtnh.write.proto.StrictJson;
 
@@ -19,7 +20,8 @@ import dev.agentcraft.gtnh.write.proto.StrictJson;
  *
  * <p>
  * Poll {@link #version} to know when to redraw. {@link #statusLine()} is the one-line text for
- * screens ("writes armed" / "writes disarmed: <reason>" / "writes LOCKED: <info>").
+ * screens ("writes armed" / "writes disarmed: <reason>" / "writes locked: <info>", plus "DRY RUN" when the
+ * control service runs in dry-run mode).
  */
 public final class ClientWriteState {
 
@@ -108,6 +110,8 @@ public final class ClientWriteState {
 
     /** Bumped on every change; the GUI redraws or re-reads when it moves. */
     public static final AtomicInteger version = new AtomicInteger();
+    /** Count of results / chat lines ever received; the GUI keeps the last value it printed or showed. */
+    public static final AtomicLong resultSeq = new AtomicLong(), chatSeq = new AtomicLong();
 
     public static volatile boolean armed, locked, hermesLocked, dryRun, overridden, linkUp;
     /** Why writes are disarmed ("" when armed). */
@@ -131,9 +135,9 @@ public final class ClientWriteState {
     }
 
     public static String statusLine() {
-        if (locked) return "writes LOCKED: " + lockInfo;
-        if (!armed) return "writes disarmed: " + reason;
-        return "writes armed" + (dryRun ? " (dry run: nothing real executes)" : "") + (overridden ? " [dev override]" : "");
+        if (locked) return "writes locked: " + (lockInfo.isEmpty() ? "locked" : lockInfo) + (dryRun ? " \u00b7 DRY RUN" : "");
+        if (!armed) return "writes disarmed: " + reason + (dryRun ? " \u00b7 DRY RUN" : "");
+        return "writes armed" + (dryRun ? " \u00b7 DRY RUN: nothing real executes" : "") + (overridden ? " [dev override]" : "");
     }
 
     /** The open Confirm request, or null (also null once its 60 s are up). */
@@ -145,6 +149,32 @@ public final class ClientWriteState {
             return null;
         }
         return p;
+    }
+
+    /** The newest result for this request id, or null. */
+    public static synchronized ResultInfo resultFor(String requestId) {
+        for (ResultInfo r : RESULTS) if (r.requestId.equals(requestId)) return r;
+        return null;
+    }
+
+    /** The newest {@code n} results, newest first. */
+    public static synchronized List<ResultInfo> recent(int n) {
+        List<ResultInfo> out = new ArrayList<>();
+        for (ResultInfo r : RESULTS) {
+            if (out.size() >= n) break;
+            out.add(r);
+        }
+        return out;
+    }
+
+    /** The newest {@code n} chat lines, newest first (the chat printer walks until it reaches the last one it printed). */
+    public static synchronized List<ChatLine> recentChat(int n) {
+        List<ChatLine> out = new ArrayList<>();
+        for (ChatLine c : CHAT) {
+            if (out.size() >= n) break;
+            out.add(c);
+        }
+        return out;
     }
 
     /** Newest first. */
@@ -288,6 +318,7 @@ public final class ClientWriteState {
         synchronized (ClientWriteState.class) {
             RESULTS.addFirst(r);
             while (RESULTS.size() > MAX_RESULTS) RESULTS.removeLast();
+            resultSeq.incrementAndGet();
         }
         version.incrementAndGet();
     }
@@ -296,6 +327,7 @@ public final class ClientWriteState {
         synchronized (ClientWriteState.class) {
             CHAT.addFirst(new ChatLine(conversation, agentId, text, fin));
             while (CHAT.size() > MAX_CHAT) CHAT.removeLast();
+            chatSeq.incrementAndGet();
         }
         version.incrementAndGet();
     }

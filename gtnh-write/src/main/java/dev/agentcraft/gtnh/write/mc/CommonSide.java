@@ -24,6 +24,7 @@ public class CommonSide {
 
     public void serverStarting(FMLServerStartingEvent event) {
         WriteRuntime.start(event.getServer());
+        event.registerServerCommand(new AskCommand());
     }
 
     public void serverStopping(FMLServerStoppingEvent event) {

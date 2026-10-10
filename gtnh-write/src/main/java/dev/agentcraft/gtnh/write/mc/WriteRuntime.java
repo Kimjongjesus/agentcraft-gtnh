@@ -108,11 +108,12 @@ public final class WriteRuntime implements Controller.Notifier, Controller.Prese
 
     // ---- netty thread -------------------------------------------------------------------------------------
 
-    public static void enqueue(EntityPlayerMP p, int kind, String a, String b) {
-        if (p == null || instance == null || WORK.size() >= QUEUE_MAX) return;
+    public static boolean enqueue(EntityPlayerMP p, int kind, String a, String b) {
+        if (p == null || instance == null || WORK.size() >= QUEUE_MAX) return false;
         int mine = 0;
-        for (Object[] w : WORK) if (w[0] == p && ++mine >= PER_PLAYER) return;
+        for (Object[] w : WORK) if (w[0] == p && ++mine >= PER_PLAYER) return false;
         WORK.add(new Object[] { p, Integer.valueOf(kind), a, b });
+        return true;
     }
 
     // ---- server thread ------------------------------------------------------------------------------------

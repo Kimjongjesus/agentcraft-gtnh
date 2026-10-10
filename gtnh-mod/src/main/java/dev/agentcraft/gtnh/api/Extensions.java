@@ -46,6 +46,12 @@ public final class Extensions {
         /** true = the click was consumed. */
         boolean footerClick(String screen, Object subject, float x0, float y0, float x1, float y1, int mouseX, int mouseY, int button);
 
+        /**
+         * A key was typed on the screen. true = the add-on consumed it (a text box in the strip has
+         * focus), so the screen must not act on it (Esc included); false = the screen handles it.
+         */
+        boolean footerKey(String screen, Object subject, char ch, int key);
+
         /** Replaces the screen's "read-only" notice with a status line; null keeps the notice. */
         String statusLine(String screen);
     }

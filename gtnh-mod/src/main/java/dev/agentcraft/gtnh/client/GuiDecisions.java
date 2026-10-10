@@ -208,6 +208,8 @@ public class GuiDecisions extends GuiScreen {
 
     @Override
     protected void keyTyped(char ch, int key) {
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks hk = dev.agentcraft.gtnh.api.Extensions.client;
+        if (hk != null && footerH() > 0 && hk.footerKey("decisions", selectedDecision(), ch, key)) return;
         if (key == Keyboard.KEY_ESCAPE) {
             mc.displayGuiScreen(null);
             return;
