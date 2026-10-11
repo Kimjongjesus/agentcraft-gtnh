@@ -1,0 +1,60 @@
+# Card 7 B2 scenes, part A: dispatch -> Confirm -> applied (dry run), then a second dispatch locked while the Confirm
+# screen is open. Console commands, fed by `run-write-qa.sh server feed` ("sleep N" waits). DEV/QA arena ONLY.
+# "say devgui/devshot" are the core's DevShots; "say devwrite" is this module's WriteDevAuto (it presses the same
+# buttons a player presses).
+gamerule doMobSpawning false
+gamemode 1 Developer
+tp Developer -56 4 -240
+agentcraft anchor set desk_1 -56.5 4 -240.5
+sleep 3
+say devhud off
+say devwrite sync
+sleep 3
+# 1. the task wall with the write footer strip (status, DRY RUN badge, Lock, Write actions, Dispatch ...)
+say devgui taskwall - t-demo-1
+sleep 4
+say devwrite dump
+say devshot b2-01-taskwall-footer
+sleep 4
+# 2. Dispatch -> pick a builder profile
+say devwrite click footer.dispatch
+sleep 2
+say devshot b2-02-pick-builder
+sleep 4
+# 3. builder-a -> request -> the control service's prompt -> the Confirm screen (60 s countdown, DRY RUN badge)
+say devwrite click profile.builder-a
+sleep 5
+say devwrite dump
+say devshot b2-03-confirm
+sleep 4
+# 4. Confirm -> applied (dry run: nothing ran)
+say devwrite click confirm
+sleep 5
+say devshot b2-04-applied-dry-run
+sleep 4
+say devwrite click close
+sleep 2
+# 5. a second dispatch (second card), then the lock button WHILE the Confirm screen is open
+say devgui taskwall - t-demo-8
+sleep 3
+say devwrite click footer.dispatch
+sleep 2
+say devwrite click profile.builder-a
+sleep 5
+say devshot b2-05-confirm-before-lock
+sleep 4
+say devwrite click lock
+sleep 5
+say devwrite dump
+say devshot b2-06-locked
+sleep 4
+# 6. further requests while locked: the client refuses locally; a modified client's raw request must be refused by the
+#    server and audited
+say devwrite click footer.dispatch
+sleep 2
+say devshot b2-07-refused-while-locked
+sleep 3
+say devwrite raw card.dispatch card=t-demo-8 board=main profile=builder-a
+sleep 3
+say devwrite raw decision.answer card=t-demo-2 decision=d-main-101 choice=Option_A
+sleep 3

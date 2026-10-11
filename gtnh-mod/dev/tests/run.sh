@@ -19,3 +19,9 @@ for c in StationAssignerCheck UiPureCheck PlateLayoutCheck EditCheck; do
   "${BIN}java" -ea -cp "$OUT" "$c"
 done
 "${BIN}java" -ea -cp "$OUT" OpsCheck "$OUT/ops-trace.jsonl"
+# card 7: scan the built core jar for the write path's wire names when one exists (run ./gradlew assemble first)
+have_jar=0
+for j in build/libs/agentcraftgtnh-*.jar; do
+  case "$j" in *-sources.jar) ;; *) [ -e "$j" ] && have_jar=1 ;; esac
+done
+if [ "$have_jar" -eq 1 ]; then dev/tests/core-jar-scan.sh; else echo "core-jar-scan: skipped (no core jar in build/libs yet)"; fi

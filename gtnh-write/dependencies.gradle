@@ -1,0 +1,15 @@
+/*
+ * The write module compiles against the core mod (agentcraftgtnh). It is a separate mod with its own
+ * jar, so the core is NOT shaded in: it is a compile-time (and dev-run) dependency only. Build the
+ * core first (gtnh-mod: ./gradlew assemble); this picks up the deobfuscated dev jar it left in
+ * ../gtnh-mod/build/libs/ (agentcraftgtnh-<version>-dev.jar), or the jar named by -PcoreDevJar=<path>.
+ * At runtime the core jar sits in the same mods/ folder (Forge dependency required-after:agentcraftgtnh).
+ */
+def coreDevJar = providers.gradleProperty("coreDevJar").orNull
+def coreFiles = coreDevJar != null ? files(coreDevJar) : fileTree("../gtnh-mod/build/libs") {
+    include("agentcraftgtnh-*-dev.jar")
+}
+
+dependencies {
+    devOnlyNonPublishable(coreFiles)
+}

@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "boards": {
+    "main": {
+      "cards": [
+        { "id": "t-demo-1", "title": "Add the placeholder widget", "body": "Placeholder card body. Dispatchable: status todo, no assignee, no run.", "status": "todo", "priority": 10, "model": "model-a" },
+        { "id": "t-demo-2", "title": "Pick a placeholder option", "body": "Waiting on a plain question with offered choices.", "status": "todo", "assignee": "builder-a" },
+        { "id": "t-demo-3", "title": "Name the placeholder module", "body": "Waiting on an open-text question.", "status": "todo", "assignee": "builder-a" },
+        { "id": "t-demo-4", "title": "Run the placeholder command", "body": "Waiting on a permission halt.", "status": "todo", "assignee": "builder-a" },
+        { "id": "t-demo-5", "title": "Placeholder feature demo", "body": "Waiting on a demo-ready hand-off.", "status": "todo", "assignee": "builder-a" },
+        { "id": "t-demo-6", "title": "Placeholder build in progress", "body": "A running card: edits are refused, comments are fine.", "status": "running", "assignee": "builder-a", "run": 7, "model": "model-a" },
+        { "id": "t-demo-7", "title": "Placeholder finished work", "body": "Done.", "status": "done", "assignee": "builder-a" }
+      ],
+      "decisions": [
+        { "id": "d-main-101", "card": "t-demo-2", "reason": "QUESTION q1: Which placeholder option should the widget use? || CHOICES: Option A | Option B | Option C", "blockKind": "needs_input" },
+        { "id": "d-main-102", "card": "t-demo-3", "reason": "QUESTION q2: What should the placeholder module be called?", "blockKind": "needs_input" },
+        { "id": "d-main-103", "card": "t-demo-4", "reason": "PERMISSION p1: run the placeholder command on host-a || CHOICES: Approve | Deny", "blockKind": "needs_input" },
+        { "id": "d-main-104", "card": "t-demo-5", "reason": "DEMO READY h1: the placeholder feature is ready for review || CHOICES: Send to review | Revise", "blockKind": "needs_input" }
+      ]
+    }
+  }
+}

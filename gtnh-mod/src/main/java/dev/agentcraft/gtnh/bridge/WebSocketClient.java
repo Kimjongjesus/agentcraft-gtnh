@@ -8,6 +8,9 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -24,11 +27,31 @@ public final class WebSocketClient {
     private static final String GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private static final int MAX_MESSAGE = 16 * 1024 * 1024;
 
+    private final int maxMessage;
+    private final boolean strict;
     private final Socket socket = new Socket();
     private final SecureRandom random = new SecureRandom();
     private InputStream in;
     private OutputStream out;
     private volatile boolean closed;
+
+    /** The default client (the read link): up to 16 MiB per message, lenient about binary and fragments. */
+    public WebSocketClient() {
+        this(MAX_MESSAGE, false);
+    }
+
+    /**
+     * An opt-in strict client. {@code maxMessage} bytes is the transport limit for one whole message
+     * (all fragments together), enforced from the frame header before anything is allocated or
+     * accumulated. {@code strict} also means: text only (a binary frame closes the connection),
+     * no new data frame inside an unfinished message, control frames of at most 125 bytes and not
+     * fragmented, and invalid UTF-8 is an error.
+     */
+    public WebSocketClient(int maxMessage, boolean strict) {
+        if (maxMessage < 1) throw new IllegalArgumentException("maxMessage");
+        this.maxMessage = maxMessage;
+        this.strict = strict;
+    }
 
     public void connect(URI uri, int timeoutMs) throws IOException {
         if (!"ws".equalsIgnoreCase(uri.getScheme())) {
@@ -154,8 +177,14 @@ public final class WebSocketClient {
                 len = 0;
                 for (int i = 0; i < 8; i++) len = (len << 8) | readByte();
             }
-            if ((b2 & 0x80) != 0) throw new IOException("server frames must not be masked");
-            if (len > MAX_MESSAGE || msg.size() + len > MAX_MESSAGE) throw new IOException("message too large");
+            if ((b2 & 0x80) != 0) fail("server frames must not be masked");
+            // the limit is checked from the header, before any payload byte is allocated or read
+            if (len < 0 || len > maxMessage || (opcode < 8 && msg.size() + len > maxMessage)) fail("message too large");
+            if (strict) {
+                if ((opcode & 0x8) != 0 && (len > 125 || !fin)) fail("bad control frame");
+                if (opcode == 0x2) fail("binary frames are not accepted");
+                if ((opcode == 0x1) && inMessage) fail("new data frame inside an unfinished message");
+            }
             byte[] data = readFully((int) len);
             switch (opcode) {
                 case 0x8: // close
@@ -173,16 +202,35 @@ public final class WebSocketClient {
                     inMessage = true;
                     break;
                 case 0x0:
-                    if (!inMessage) throw new IOException("unexpected continuation frame");
+                    if (!inMessage) fail("unexpected continuation frame");
                     msg.write(data, 0, data.length);
                     break;
                 default:
-                    throw new IOException("bad opcode " + opcode);
+                    fail("bad opcode " + opcode);
             }
             if (fin) {
-                return new String(msg.toByteArray(), StandardCharsets.UTF_8);
+                if (!strict) return new String(msg.toByteArray(), StandardCharsets.UTF_8);
+                try {
+                    return StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT)
+                        .onUnmappableCharacter(CodingErrorAction.REPORT)
+                        .decode(ByteBuffer.wrap(msg.toByteArray()))
+                        .toString();
+                } catch (CharacterCodingException e) {
+                    fail("text message is not valid UTF-8");
+                }
             }
         }
+    }
+
+    /**
+     * A protocol violation: the peer is not trusted any more, so the connection is aborted (no close frame:
+     * a graceful close would wait for the send monitor, which a writer stuck on a full socket holds) and the
+     * read fails.
+     */
+    private void fail(String why) throws IOException {
+        abort();
+        throw new IOException(why);
     }
 
     private int readByte() throws IOException {
@@ -202,6 +250,25 @@ public final class WebSocketClient {
         return buf;
     }
 
+    /**
+     * Hard abort, for a caller that must not wait: marks the client closed and closes the socket at once.
+     * It takes no lock (a send blocked on a full socket holds the send monitor; this does not wait for
+     * it), sends no close frame, and sets SO_LINGER 0 so bytes still in the local send buffer are
+     * discarded and the peer sees a reset. A thread blocked in a socket write or read gets an
+     * IOException; a send that has not reached its closed-check yet fails with "closed". Idempotent;
+     * {@link #close} after it does nothing.
+     */
+    public void abort() {
+        closed = true;
+        try {
+            socket.setSoLinger(true, 0);
+        } catch (IOException | RuntimeException ignored) {}
+        try {
+            socket.close();
+        } catch (IOException ignored) {}
+    }
+
+    /** Graceful close for normal shutdown: sends a close frame (waiting for any send in progress), then closes the socket. */
     public void close() {
         if (closed) return;
         if (out != null) {

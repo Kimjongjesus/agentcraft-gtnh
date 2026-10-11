@@ -1,0 +1,52 @@
+# systemd --user unit for the Hermes-side control service (card 7, the write path).
+#
+# NOT installed or enabled by the build, and the policy it points at ships with every capability
+# switched off. To deploy (the owner's call, only after the verification step in docs/write-path.md 7.2):
+#   1. create a dedicated user (or use the Hermes user) and, as that user:
+#        install -d -m 700 ~/.config/agentcraft-gtnh/control ~/.local/state/agentcraft-gtnh/control
+#        head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n' > ~/.config/agentcraft-gtnh/control/key; chmod 600 ~/.config/agentcraft-gtnh/control/key
+#        cp hermes_control/policy.empty.json ~/.config/agentcraft-gtnh/control/policy.json; chmod 600 ~/.config/agentcraft-gtnh/control/policy.json
+#        python3 -m hermes_control check-policy --policy ~/.config/agentcraft-gtnh/control/policy.json
+#   2. put the SAME key (a copy, mode 600) on the game server for the write module;
+#   3. copy this file to ~/.config/systemd/user/hermes-agentcraft-control.service, then:
+#        systemctl --user daemon-reload && systemctl --user enable --now hermes-agentcraft-control
+#   Reload the policy:  systemctl --user reload hermes-agentcraft-control      (SIGHUP; voids confirm tokens)
+#   Lock from a terminal: python3 -m hermes_control lock --reason "..."   Unlock: python3 -m hermes_control unlock
+#
+# It binds LOOPBACK only. The game server on another host reaches it through an SSH or VPN tunnel
+# that ends on 127.0.0.1 on both sides; a LAN bind needs --insecure-lan-bind and is not recommended
+# (the link is signed, not encrypted).
+[Unit]
+Description=AgentCraft control service: allowlisted writes from the game to Hermes (HMAC-signed action.* frames)
+After=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/agentcraft-gtnh/hermes-adapter
+ExecStart=/usr/bin/python3 -m hermes_control serve \
+    --policy %h/.config/agentcraft-gtnh/control/policy.json \
+    --key-file %h/.config/agentcraft-gtnh/control/key \
+    --state-dir %h/.local/state/agentcraft-gtnh/control \
+    --bind 127.0.0.1 --port 7879
+# Dry run (executes nothing, answers dryRun:true): append  --dry-run [--board-fixture hermes_control/fixtures/board.example.json]
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=10
+# A start-up refusal (bad policy, key or directory permissions) exits with status 2: do not loop on it.
+RestartPreventExitStatus=2
+# The executors run the hermes CLI and the policy's service commands as THIS user, so the user is the
+# boundary: give it nothing it should not be able to do. The home directory stays writable (the ledger
+# and the Hermes board live there), so ProtectSystem=full and no ProtectHome.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=256M
+CPUQuota=50%
+# Untested as a unit: verify on install with `journalctl --user -u hermes-agentcraft-control`.
+
+[Install]
+WantedBy=default.target

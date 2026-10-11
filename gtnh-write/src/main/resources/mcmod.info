@@ -1,0 +1,21 @@
+{
+	"modListVersion": 2,
+	"modList": [{
+		"modid": "${modId}",
+		"name": "${modName}",
+		"description": "Write module for AgentCraft GTNH: a fenced, audited, lockable path from the game to a Hermes control service. Needs agentcraftgtnh. Without this jar the office stays read-only.",
+		"version": "${modVersion}",
+		"mcversion": "${minecraftVersion}",
+		"url": "https://github.com/Kimjongjesus/agentcraft-gtnh",
+		"updateUrl": "",
+		"authorList": ["Kimjongjesus"],
+		"credits": "Build template: GTNewHorizons/ExampleMod1.7.10 (MIT).",
+		"logoFile": "",
+		"screenshots": [],
+		"parent": "",
+		"requiredMods": ["agentcraftgtnh"],
+		"dependencies": ["agentcraftgtnh"],
+		"dependants": [],
+		"useDependencyInformation": false
+	}]
+}

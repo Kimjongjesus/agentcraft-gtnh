@@ -1,0 +1,20 @@
+{
+  "schema": 1,
+  "actors": ["00000000-0000-4000-8000-000000000001"],
+  "lockSetsHermesLock": true,
+  "hermesProgram": ["hermes"],
+  "capabilities": {
+    "decision.answer": { "enabled": true, "boards": ["main"], "permissionApprove": false, "handoffAnswerable": false },
+    "card.create":     { "enabled": true, "boards": ["main"] },
+    "card.edit":       { "enabled": true, "boards": ["main"] },
+    "card.dispatch":   { "enabled": false, "boards": ["main"], "profiles": ["builder-a"] },
+    "agent.chat":      { "enabled": false, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 120 },
+    "agent.ask":       { "enabled": false, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 120 },
+    "service.restart": { "enabled": false },
+    "cron.run":        { "enabled": false }
+  },
+  "services": {
+    "service-1": { "argv": ["systemctl", "--user", "restart", "service-1.service"], "timeoutSeconds": 60 }
+  },
+  "jobs": ["job-a1"]
+}

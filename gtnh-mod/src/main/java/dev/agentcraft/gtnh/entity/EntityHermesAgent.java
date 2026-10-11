@@ -76,6 +76,16 @@ public class EntityHermesAgent extends EntityLiving {
         getEntityAttribute(SharedMonsterAttributes.followRange).setBaseValue(48.0D);
     }
 
+    /** An add-on may handle a right-click (server side only; without one nothing happens). */
+    @Override
+    protected boolean interact(EntityPlayer player) {
+        dev.agentcraft.gtnh.api.Extensions.ServerHooks h = dev.agentcraft.gtnh.api.Extensions.server;
+        if (h != null && !worldObj.isRemote && player instanceof net.minecraft.entity.player.EntityPlayerMP) {
+            return h.agentClicked((net.minecraft.entity.player.EntityPlayerMP) player, getAgentId());
+        }
+        return false;
+    }
+
     /** Vanilla AI loop on (navigator, move/look/jump helpers) but with no AI tasks: we drive it. */
     @Override
     public boolean isAIEnabled() {

@@ -157,6 +157,8 @@ public final class EditService {
 
     /** null when the player may edit, else why not. */
     public String denied(EntityPlayerMP p) {
+        String ext = dev.agentcraft.gtnh.api.Extensions.editLockReason();
+        if (ext != null) return ext;
         if (!Config.editEnabled) return "the edit tool is disabled in the server config (edit.enabled)";
         if (engine == null) return "the edit tool is not running";
         if (p == null) return null;
@@ -916,6 +918,8 @@ public final class EditService {
 
     /** /agentcraft anchor set|remove and bind overflow: the same edit as the anchor editor. */
     public EditEngine.Result recordAnchor(EntityPlayerMP p, int dim, String name, Anchor a) {
+        String ext = dev.agentcraft.gtnh.api.Extensions.editLockReason();
+        if (ext != null) return EditEngine.Result.refused(ext);
         actorDim = dim;
         return engine.edit(who(p), (a == null ? "anchor remove " : "anchor set ") + name, one(Op.Change.anchor(name, a)));
     }
@@ -927,6 +931,8 @@ public final class EditService {
      */
     public EditEngine.Result recordBind(EntityPlayerMP p, World world, int x, int y, int z, String binding, int w, int h) {
         if (world.provider.dimensionId != hq()) return null;
+        String ext = dev.agentcraft.gtnh.api.Extensions.editLockReason();
+        if (ext != null) return EditEngine.Result.refused(ext);
         Pos pos = new Pos(x, y, z);
         PanelSpec cur = engineWorld().read(pos);
         if (cur == null) return null;

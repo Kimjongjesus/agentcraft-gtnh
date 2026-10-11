@@ -92,7 +92,13 @@ public class GuiTaskWall extends GuiScreen {
         bottom = height - pad;
         split = Math.max(170, Math.min(width * 0.46F, 300));
         list.bounds(pad, listTop, split, bottom);
-        detail.bounds(split + 8, listTop, width - pad, bottom);
+        detail.bounds(split + 8, listTop, width - pad, bottom - footerH());
+    }
+
+    /** Add-on footer strip under the detail pane (0 without an add-on: the screen stays read-only). */
+    private static float footerH() {
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks h = dev.agentcraft.gtnh.api.Extensions.client;
+        return h == null ? 0 : Math.max(0, Math.min(h.footerHeight("taskwall"), 60));
     }
 
     private List<HqData.Task> visible(BoardView v) {
@@ -112,7 +118,8 @@ public class GuiTaskWall extends GuiScreen {
         float pad = 8;
         // title row
         float tw = heavy.draw("Task wall", pad, pad, Widgets.H1, 0xFF000000 | th.text);
-        reg.draw(BoardView.scopeLabel(binding) + "  \u00b7  read-only", pad + tw + 8, pad + 3, Widgets.BODY, 0xFF000000 | th.muted);
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks hooks = dev.agentcraft.gtnh.api.Extensions.client;
+        String hookNote = hooks == null ? null : hooks.statusLine("taskwall");
         float right = width - pad;
         if (!ClientAgentCache.linkUp) {
             right -= Ui.pillRight(reg, "adapter offline \u00b7 last data", right, pad + 1, Widgets.SMALL, th.danger) + 4;
@@ -120,7 +127,10 @@ public class GuiTaskWall extends GuiScreen {
             right -= Ui.pillRight(bold, v.goal.openDecisions + " need you", right, pad + 1, Widgets.SMALL + 0.6F, th.accent) + 4;
         }
         String sum = v.openCount() + " open  \u00b7  " + v.doneAllTime() + " / " + v.goal.total + " done all time (" + Math.round(v.goal.progress * 100) + "%)";
-        reg.drawRight(sum, right, pad + 3, Widgets.SMALL + 0.4F, 0xFF000000 | th.muted);
+        float sumW = reg.drawRight(sum, right, pad + 3, Widgets.SMALL + 0.4F, 0xFF000000 | th.muted);
+        // the left text (scope + the add-on's status) gets only the room the stats on the right leave free
+        float leftX = pad + tw + 8;
+        reg.drawFit(BoardView.scopeLabel(binding) + "  \u00b7  " + (hookNote != null ? hookNote : "read-only"), leftX, pad + 3, Widgets.BODY, right - sumW - 10 - leftX, 0xFF000000 | th.muted);
         tabs.draw(th, mx, my);
 
         // ---- list --------------------------------------------------------------------------
@@ -174,6 +184,10 @@ public class GuiTaskWall extends GuiScreen {
         if (cards.isEmpty()) reg.draw(ClientHq.haveBoard ? "No cards in this column." : "Waiting for the board\u2026", list.x0 + 4, list.y0 + 4, Widgets.BODY, 0xFF000000 | th.muted);
 
         drawDetail(v);
+        float fh = footerH();
+        if (fh > 0) {
+            dev.agentcraft.gtnh.api.Extensions.client.drawFooter("taskwall", selectedId == null ? null : ClientHq.task(selectedId), detail.x0, detail.y1 + 2, detail.x1, detail.y1 + fh, mx, my);
+        }
         if (hover != null) {
             List<String> tip = new ArrayList<>();
             tip.add(hover.title);
@@ -297,6 +311,11 @@ public class GuiTaskWall extends GuiScreen {
     @Override
     protected void mouseClicked(int mx, int my, int button) {
         super.mouseClicked(mx, my, button);
+        float fh = footerH();
+        if (fh > 0 && mx >= detail.x0 && mx <= detail.x1 && my >= detail.y1 + 2 && my <= detail.y1 + fh) {
+            if (dev.agentcraft.gtnh.api.Extensions.client.footerClick("taskwall", selectedId == null ? null : ClientHq.task(selectedId), detail.x0, detail.y1 + 2, detail.x1,
+                detail.y1 + fh, mx, my, button)) return;
+        }
         if (tabs.click(mx, my)) {
             list.offset = 0;
             return;
@@ -315,6 +334,8 @@ public class GuiTaskWall extends GuiScreen {
 
     @Override
     protected void keyTyped(char ch, int key) {
+        dev.agentcraft.gtnh.api.Extensions.ClientHooks hk = dev.agentcraft.gtnh.api.Extensions.client;
+        if (hk != null && footerH() > 0 && hk.footerKey("taskwall", selectedId == null ? null : ClientHq.task(selectedId), ch, key)) return;
         super.keyTyped(ch, key);
         if (key == Keyboard.KEY_DOWN) detail.wheel(-1, 10);
         if (key == Keyboard.KEY_UP) detail.wheel(1, 10);

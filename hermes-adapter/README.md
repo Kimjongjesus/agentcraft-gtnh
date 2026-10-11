@@ -113,6 +113,17 @@ it is a private file on the adapter host and never belongs in a repository or a 
 Size: a compressed snapshot of a 300-machine base is about 20 KiB (about 3 MiB a day of snapshots),
 plus one small row per capture and per event; the 256 MiB cap is a backstop, not the usual size.
 
+## Write path (control service, card 7)
+
+The adapter above never writes. The write path is a separate package, `hermes_control/`, with its
+own process, port (`ws://127.0.0.1:7879`), key, policy, ledger, audit log and lock. It ships
+**disabled** (`hermes_control/policy.empty.json`: no actors, every capability off) and nothing in this
+repository starts it. Run, policy schema, lock, dry run and threat notes: [CONTROL.md](CONTROL.md);
+wire contract: [../docs/action-protocol.md](../docs/action-protocol.md).
+
+    python3 -m hermes_control check-policy --policy hermes_control/policy.example.json
+    python3 scripts/control_client.py --help          # signed test client for QA
+
 ## Tests
 
     PYTHONPATH=. python3 -m unittest discover -s tests      # mapping, redaction, server, access policy
