@@ -1,6 +1,15 @@
-# Card 7: the write path (design, not implemented)
+# Card 7: the write path (design; built on branch, nothing enabled)
 
-Status: **design proposal, awaiting the owner's approval.** An independent security review of the
+Status: **built, awaiting review; nothing is enabled.** The owner approved this design with the
+proposed defaults ("Card 7 with proposed defaults"). The implementation follows it: the wire
+contract is pinned in [action-protocol.md](action-protocol.md), the control service is
+`hermes-adapter/hermes_control/` ([CONTROL.md](../hermes-adapter/CONTROL.md)) and the write module
+is the separate `gtnh-write/` jar ([README](../gtnh-write/README.md)). The shipped policy is empty
+(every capability off, no actor), and the example policy uses placeholders only. Section 10 below
+records which option was taken for each open question. The rest of this document is the design as
+approved; the text below this paragraph still describes the state before card 7 was built.
+
+An independent security review of the
 first draft has been folded in (signed handshake, nonce and idempotency rules, confirm-token
 atomicity, lock semantics, audit failure, chat toolset, decision classification). No code in this
 repository acts on Hermes from the game yet. Today the adapter refuses every client intent and every
@@ -459,3 +468,21 @@ review and the owner's approval.
    who besides you may edit the policy file?
 10. **Hand-off decisions:** may a "demo ready" style decision (one that sends work on to review) be
     answered from the game, or should those stay outside the game like permission halts?
+
+### 10.1 What card 7 implements for each question
+
+The owner's decision was "Card 7 with proposed defaults". Where the document proposed an option it
+is used; where it did not, the most restrictive option was chosen and can be changed in one place.
+
+| # | taken | where it lives |
+| --- | --- | --- |
+| 1 | proposed: `Deny` only (with an optional note); `Approve` is always refused | `decision.answer.permissionApprove` must be `false`; `true` stops the service |
+| 2 | as written: a single press, limits as in section 3 | the restart / run buttons; limits in `docs/action-protocol.md` 4.1 |
+| 3 | proposed: read-only toolset enforced by Hermes; because that enforcement cannot be proven inside this repository, chat **ships disabled** | `agent.chat` / `agent.ask` `enabled: false`; a denied toolset name stops the service |
+| 4 | chosen (restrictive): plaintext never leaves the host; the control service binds loopback, use an SSH or VPN tunnel | `--insecure-lan-bind` is the only way to bind elsewhere |
+| 5 | chosen (restrictive): one panic button. The game write lock also locks the edit tool, and also sets the Hermes-side lock (unlocking needs the terminal) | `lockAlsoLocksEdit=true` in the module config; `lockSetsHermesLock: true` in the policy |
+| 6 | as instructed: the arming gate is QA'd on an online-mode test server; screenshots use a dev override that works only on a loopback-bound server against a control service in dry-run mode (mock executors, nothing runs) | JVM property `agentcraft.write.devOverride=loopback-dry-run`; `--dry-run` (plus `--dev-offline-actors` for the offline dev player) |
+| 7 | proposed: no tier 2 capability enabled; the shipped policy is empty | `hermes_control/policy.empty.json`; placeholders only in `policy.example.json` |
+| 8 | chosen (restrictive): tier 2 needs the player within 8 blocks of an office anchor | `presenceRadius` in the module config (0 turns it off) |
+| 9 | proposed: same host as the adapter, own user; chosen (restrictive): only the service's own user may write the policy, key and lock files | start refused when any of them is owned by someone else or group/other-writable |
+| 10 | chosen (restrictive): hand-off decisions (demo ready, review, revise) stay read-only in the game | `decision.answer.handoffAnswerable: false` |

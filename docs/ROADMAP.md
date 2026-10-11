@@ -22,7 +22,7 @@ Compatibility target: **GT New Horizons 2.9.x only** (Forge 1.7.10, Java 8 throu
 
 | card | what |
 |---|---|
-| 7 | Write path through a small control service with an allowlist of actions (answer decisions, create, edit and dispatch cards, chat with agents, restart named services, rerun scheduled jobs). Confirmation on builder dispatch, an audit log and a one-click write lock; the server moves to online mode with a whitelist first. Design proposal (not approved, no code): [`write-path.md`](write-path.md). |
+| 7 | Write path (built, awaiting review; **nothing enabled**): a separate control service (`hermes-adapter/hermes_control/`, [CONTROL.md](../hermes-adapter/CONTROL.md)) with an allowlist policy, signed `action.*` frames ([action-protocol.md](action-protocol.md)), a replay and idempotency ledger, single-use confirm tokens, an audit log and a write lock; and a separate write-module jar (`gtnh-write/`) with the online-mode arming gate, its own channel, a game-side audit and lock, and the screens (dispatch Confirm, lock button, decision answers, card forms, chat window, `/ask`, restart and run). Leaving the jar out keeps the office read-only; the shipped policy is empty. Design and the answers to its open questions: [`write-path.md`](write-path.md). |
 | 8 | Read-only web dashboard on the local network. |
 | 9 | Install on a real world: fresh backup first, explicit owner approval, adapter running as a service. |
 
