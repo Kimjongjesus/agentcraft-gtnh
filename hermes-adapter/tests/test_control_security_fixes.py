@@ -637,6 +637,11 @@ class F10HandshakeOrderTest(ControlCase):
         self.install(hook)
         c = self.env.client()
         self.assertEqual(seen, ["handshaking"])
+        # the server marks the connection ready just after its last handshake send returns, which can be a
+        # moment after the client has read that frame: wait for it instead of racing it
+        deadline = time.monotonic() + 3.0
+        while [x.state for x in self.env.svc.conns] != ["ready"] and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertEqual([x.state for x in self.env.svc.conns], ["ready"])
         c.close()
 
