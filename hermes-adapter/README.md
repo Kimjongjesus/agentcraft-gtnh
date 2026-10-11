@@ -20,6 +20,31 @@ It never writes to Hermes: every client intent (goals, messages, decision answer
 actions, repo.add) is refused with `ack {ok:false}`. Mapping, read-only guarantees and secret
 stripping: [MAPPING.md](MAPPING.md).
 
+## HTTP dashboard
+
+The optional dashboard is a separate, read-only HTTP listener for the adapter's mapped Hermes and ops snapshots. It is disabled unless `--dashboard` is given. Its default address is `127.0.0.1:8787`; it is loopback-only by default.
+
+    python3 -m hermes_adapter --dashboard
+    python3 -m hermes_adapter --dashboard --dashboard-bind 192.0.2.10 --dashboard-allow-lan
+
+For LAN access, choose the specific interface IP (not a wildcard) and explicitly add `--dashboard-allow-lan`. The dashboard listener is independent of the WebSocket `--bind`, `--allow-host`, and `--allow-peer` options. It has no login or TLS by design and is intended only for a trusted network, never direct Internet exposure. It serves GET requests only; HEAD and other methods are refused. Routes are fixed, the `Host` header must exactly match the listener authority, and there are no write, arbitrary-file, or world-telemetry routes.
+
+The dashboard is display-only, not a complete privacy anonymizer: task, goal, and other titles remain visible. The adapter's text redaction applies here too, including the default IPv4/IPv6 redaction; `--allow-ip-text` disables that IP-text redaction across clients and therefore also affects the dashboard. Do not expose sensitive board data to an untrusted network.
+
+`GET /api/snapshot` returns a JSON envelope with `snapshot`, `ops`, and `meta` (including generated/updated timestamps, poll count, stale status, and `readOnly: true`). It contains only the adapter's existing mapped protocol fields. Strings are filtered before output; pathological values, excessive depth/size, and oversized responses fail closed. The API and static assets send `Cache-Control: no-store`. The bounded server limits concurrent clients, request/header sizes, request/output deadlines, and response size; browser scripts fetch same-origin with no-store.
+
+Task display is bounded: the adapter supplies at most 200 task cards and the UI shows up to eight newest cards per column. Recent done cards use the supplied three-day task window, while all-time completion is shown separately; these totals are intentionally different. Cancelled cards are hidden from the wall and excluded from board totals. Display caps and source freshness are labelled rather than implying complete coverage.
+
+For reproducible synthetic data, use a fresh scratch directory and explicitly point the adapter at its fixture home (the normal default is the real Hermes home):
+
+    demo_dir=$(mktemp -d)
+    python3 scripts/demo_hq.py "$demo_dir" init
+    python3 -m hermes_adapter --hermes-home "$demo_dir/hermes-home" --ops-mock --dashboard
+    # In another shell, add older cards to demonstrate the distinct totals:
+    python3 scripts/demo_hq.py "$demo_dir" history
+
+The demo uses generic fixture content; use only such synthetic data for screenshots. `--ops-mock` alone does not replace the default live Hermes home—pass the fixture explicitly with `--hermes-home`. Dashboard fonts are served from the mod's existing font resources, which must remain available alongside the adapter.
+
 ## Ops feeds (fleet health, jobs, provider usage, alerts)
 
 Clients that send `hello.features: ["ops"]` also get the `ops.*` extension
@@ -91,6 +116,7 @@ plus one small row per capture and per event; the 256 MiB cap is a backstop, not
 ## Tests
 
     PYTHONPATH=. python3 -m unittest discover -s tests      # mapping, redaction, server, access policy
+    node --test tests/test_dashboard_js.js                 # optional frontend regressions; Node 18+, no npm packages
     scripts/run-upstream-checks.sh                           # upstream zod schema + fake-mod.ts (needs `npm ci` in ../foreman)
 
 ## Deployment
