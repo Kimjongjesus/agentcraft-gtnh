@@ -13,13 +13,14 @@ Rules that hold for every executor here:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
 import signal
 import subprocess
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, ContextManager
 
 from hermes_adapter import redact
 
@@ -28,6 +29,31 @@ from . import policy as pol
 MAX_OUTPUT = 64 * 1024
 KANBAN_TIMEOUT = 30
 CRON_TIMEOUT = 30
+
+# ---- what a LIVE service refuses outright (review r1: R1, R2) -----------------------------------
+# The Hermes command line has no conditional board change: `kanban unblock`, `assign` and `edit` act on
+# whatever the card is at that moment, so a re-check before the call cannot stop it from releasing a
+# replacement halt, assigning changed work or editing a card that just started running. Until Hermes
+# offers a change that checks the expected decision / revision / status in the same transaction, these
+# are off on a live service (refused before anything runs; the game sees them disabled). Comments and
+# new cards do not depend on board state and stay live. Game chat: the read-only tool boundary is a
+# property of the agent's effective tool closure inside Hermes, which cannot be verified from here.
+# The dry run (mock executors, nothing executed) keeps all of them so the screens can be exercised.
+NO_CONDITIONAL_CHANGE = "off on a live service: needs a conditional board change, which the Hermes command line does not offer"
+NO_CHAT_BOUNDARY = "live game chat is off: the agent's read-only tool boundary cannot be verified from here"
+PRIORITY_ALONE = "a priority change needs a title or body change with it (game edits must carry the game tag)"
+LIVE_UNAVAILABLE_CAPS = frozenset({"decision.answer", "card.dispatch", "agent.chat", "agent.ask"})  # wholly; card.edit only for field edits
+
+
+def live_unavailable(capability: str, args: dict[str, Any] | None = None) -> str | None:
+    """Why a LIVE service must refuse this request before anything runs, or None."""
+    if capability in ("decision.answer", "card.dispatch"):
+        return NO_CONDITIONAL_CHANGE
+    if capability == "card.edit" and "comment" not in (args or {}):
+        return NO_CONDITIONAL_CHANGE
+    if capability in ("agent.chat", "agent.ask"):
+        return NO_CHAT_BOUNDARY
+    return None
 # argv tokens that must never appear in a game-chat command line (enforced in code, tested)
 CHAT_FORBIDDEN_FLAGS = frozenset({"--yolo", "--resume", "-r", "--continue", "-c", "--accept-hooks", "--worktree", "-w", "--tui", "--checkpoints", "--pass-session-id"})
 CHAT_PREAMBLE = (
@@ -55,6 +81,11 @@ class ExecRequest:
     policy: pol.Policy
     prep: dict[str, Any] = field(default_factory=dict)
     revision: str = ""  # the policy revision this request was admitted under (checked again right before the executor runs)
+    # The execution-start boundary (review r1 R3): every executor enters it exactly once, immediately before
+    # it starts the command (or, for the mock, records the call). The service's boundary holds the policy
+    # lock, re-checks lock, policy and board inside it, and a policy reload or game lock waits for it.
+    start_guard: Callable[[], ContextManager[Any]] = field(default=contextlib.nullcontext, repr=False)
+    started: bool = False  # set by the service's boundary once the checks inside it passed
 
 
 @dataclass
@@ -122,9 +153,11 @@ def argv_for(req: ExecRequest) -> tuple[list[str], str | None, int]:
         board, card = req.prep["board"], req.prep["card"]
         if "comment" in a:
             return kanban(prog, board, "comment", "--author=agentcraft-game", card, f"{t} {a['comment']}"), None, KANBAN_TIMEOUT
+        if "title" not in a and "body" not in a:
+            raise ExecRefused(PRIORITY_ALONE)
         argv = kanban(prog, board, "edit")
-        if "title" in a:
-            argv.append(f"--title={a['title']}")
+        if "title" in a:  # the tag is part of the new title itself: no edited text without game provenance (review r1 R5)
+            argv.append(f"--title={t} {a['title']}")
         if "body" in a:
             argv.append(f"--body={t}\n\n{a['body']}")
         if "priority" in a:
@@ -163,15 +196,21 @@ def check_chat_argv(argv: list[str], toolsets: tuple[str, ...]) -> None:
 # ---- running ---------------------------------------------------------------------------------
 
 
-def run_argv(argv: list[str], stdin: str | None, timeout: int) -> tuple[int, str, str]:
-    """Run without a shell. Spawn failure -> ExecRefused; timeout (process group killed) -> ExecUnknown."""
-    try:
-        proc = subprocess.Popen(
-            argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            shell=False, start_new_session=True, env=os.environ.copy(),
-        )
-    except (OSError, ValueError) as e:
-        raise ExecRefused(f"could not start the command ({type(e).__name__})") from None
+def run_argv(argv: list[str], stdin: str | None, timeout: int,
+             start_guard: Callable[[], ContextManager[Any]] = contextlib.nullcontext) -> tuple[int, str, str]:
+    """Run without a shell. Spawn failure -> ExecRefused; timeout (process group killed) -> ExecUnknown.
+
+    The process is spawned INSIDE ``start_guard``: that is the execution-start boundary. Whatever the
+    guard checks (lock, policy revision, board) holds at the moment the process starts.
+    """
+    with start_guard():
+        try:
+            proc = subprocess.Popen(
+                argv, stdin=subprocess.PIPE if stdin is not None else subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                shell=False, start_new_session=True, env=os.environ.copy(),
+            )
+        except (OSError, ValueError) as e:
+            raise ExecRefused(f"could not start the command ({type(e).__name__})") from None
     try:
         out, err = proc.communicate(stdin.encode("utf-8") if stdin is not None else None, timeout=timeout)
     except subprocess.TimeoutExpired:
@@ -187,10 +226,26 @@ def run_argv(argv: list[str], stdin: str | None, timeout: int) -> tuple[int, str
     return proc.returncode, out[:MAX_OUTPUT].decode("utf-8", "replace"), err[:MAX_OUTPUT].decode("utf-8", "replace")
 
 
+def _refuse_live_unavailable(req: ExecRequest, ex: "Executor") -> None:
+    """Defence in depth: the service refuses these at admission too. Nothing has run when this raises."""
+    why = ex.unavailable(req.capability, req.args)
+    if why:
+        raise ExecRefused(why)
+
+
 class Executor:
-    """Base: real executors call :func:`run_argv`; the mock records instead."""
+    """Base: real executors call :func:`run_argv` (which spawns inside ``req.start_guard``); the mock
+    records inside the same guard instead."""
 
     name = "base"
+
+    def unavailable(self, capability: str, args: dict[str, Any]) -> str | None:
+        """Why this executor must refuse the request before anything runs (live: :func:`live_unavailable`)."""
+        return live_unavailable(capability, args)
+
+    def unavailable_caps(self) -> frozenset[str]:
+        """Capabilities this executor refuses whatever the arguments (shown to the game as disabled)."""
+        return LIVE_UNAVAILABLE_CAPS
 
     def execute(self, req: ExecRequest) -> ExecResult:
         raise NotImplementedError
@@ -200,8 +255,9 @@ class BoardExecutor(Executor):
     name = "board"
 
     def execute(self, req: ExecRequest) -> ExecResult:
+        _refuse_live_unavailable(req, self)
         argv, stdin, timeout = argv_for(req)
-        rc, out, err = run_argv(argv, stdin, timeout)
+        rc, out, err = run_argv(argv, stdin, timeout, req.start_guard)
         if rc != 0:
             raise ExecRefused(f"hermes kanban failed ({rc}): {redact.clean(err or out, 120)}")
         res: dict[str, Any] = {}
@@ -225,8 +281,9 @@ class ChatExecutor(Executor):
     name = "chat"
 
     def execute(self, req: ExecRequest) -> ExecResult:
+        _refuse_live_unavailable(req, self)
         argv, stdin, timeout = argv_for(req)
-        rc, out, err = run_argv(argv, stdin, timeout)
+        rc, out, err = run_argv(argv, stdin, timeout, req.start_guard)
         if rc != 0:
             raise ExecRefused(f"agent chat failed ({rc}): {redact.clean(err, 100)}")
         return ExecResult("applied", {"agent": req.args["agent"]}, reply=out)
@@ -236,8 +293,9 @@ class ServiceExecutor(Executor):
     name = "service"
 
     def execute(self, req: ExecRequest) -> ExecResult:
+        _refuse_live_unavailable(req, self)
         argv, _, timeout = argv_for(req)
-        rc, out, err = run_argv(argv, None, timeout)
+        rc, out, err = run_argv(argv, None, timeout, req.start_guard)
         if rc != 0:
             raise ExecRefused(f"service command failed ({rc}): {redact.clean(err or out, 120)}")
         return ExecResult("applied", _result({"service": req.args["service"], "exit": 0}))
@@ -247,8 +305,9 @@ class CronExecutor(Executor):
     name = "cron"
 
     def execute(self, req: ExecRequest) -> ExecResult:
+        _refuse_live_unavailable(req, self)
         argv, _, timeout = argv_for(req)
-        rc, out, err = run_argv(argv, None, timeout)
+        rc, out, err = run_argv(argv, None, timeout, req.start_guard)
         if rc != 0:
             raise ExecRefused(f"cron run failed ({rc}): {redact.clean(err or out, 120)}")
         return ExecResult("applied", _result({"job": req.args["job"], "note": "handed to the scheduler"}))
@@ -262,6 +321,12 @@ class MockExecutor(Executor):
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
+    def unavailable(self, capability: str, args: dict[str, Any]) -> str | None:
+        return None  # nothing executes, so the screens of the live-off capabilities can still be exercised
+
+    def unavailable_caps(self) -> frozenset[str]:
+        return frozenset()
+
     def execute(self, req: ExecRequest) -> ExecResult:
         try:
             argv, _, _ = argv_for(req)
@@ -269,7 +334,8 @@ class MockExecutor(Executor):
                 argv = argv[:1] + ["..."]  # never record the chat command line details
         except ExecRefused as e:
             raise ExecRefused(str(e)) from None
-        self.calls.append({"capability": req.capability, "args": dict(req.args), "actor": req.actor_uuid, "req": req.req_id, "argv": argv})
+        with req.start_guard():  # the same execution-start boundary as a real command
+            self.calls.append({"capability": req.capability, "args": dict(req.args), "actor": req.actor_uuid, "req": req.req_id, "argv": argv})
         res = ExecResult("applied", _result({"dryRun": "true", "would": req.capability}))
         if req.capability in ("agent.chat", "agent.ask"):
             res.reply = "[dry run] no agent was contacted."

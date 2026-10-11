@@ -1,7 +1,7 @@
 """The policy file: owner-maintained, strictly validated, never changed by anything on the wire.
 
 Unknown keys, unknown capability names, a ``permissionApprove: true`` and a chat toolset that
-contains a denied name all make loading fail, which makes the service refuse to start (or, on
+is not on the vetted allowlist all make loading fail, which makes the service refuse to start (or, on
 SIGHUP, keep the previous policy). Capabilities are off unless ``enabled`` is true.
 """
 
@@ -20,16 +20,16 @@ MAX_POLICY_BYTES = 64 * 1024
 NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$")  # never a leading '-': names end up in argv
 TOOLSET = re.compile(r"^[a-z0-9][a-z0-9_:.-]{0,63}$")
 
-# Hermes chat toolsets that must never be reachable from the game (open question 3). A policy
-# toolset whose name equals one of DENIED_EXACT or contains one of DENIED_PARTS is refused. This is
-# a denylist on top of "name your read-only toolset in the policy"; enforcement inside Hermes
-# cannot be proven here, which is why chat ships disabled.
-DENIED_EXACT = frozenset({"all", "*", "default", "full", "everything", "hermes", "hermes-cli"})
-DENIED_PARTS = (
-    "terminal", "shell", "bash", "exec", "code", "delegat", "subagent", "process", "computer", "browser",
-    "cron", "kanban", "yolo", "sudo", "ssh", "mcp", "patch", "write", "edit", "send_message", "messaging",
-    "homeassistant", "docker", "git", "approve", "unsafe",
-)
+# Game chat toolsets (open question 3): an ALLOWLIST, not a denylist. A toolset name is only a
+# label; what it reaches is decided inside Hermes (includes, plugin- and MCP-registered tools), so a
+# name-based denylist cannot keep mutation out ("debugging", "file", "skills", "safe", "coding" and
+# any custom name all reach write or shell tools). Only names whose static closure in the Hermes
+# toolset table is read-only are accepted, and unknown or custom names make the policy fail to load.
+# "search" resolves to web_search alone. The static table is not the effective closure (plugins and a
+# profile's MCP servers can add tools at run time, which this repository cannot verify), so LIVE game
+# chat is disabled in code regardless of the policy (executors.live_unavailable); the allowlist
+# governs the dry run and whatever later re-enables live chat after a verified closure check.
+CHAT_TOOLSETS_VETTED = frozenset({"search"})
 
 DEFAULT_LIMITS: dict[str, dict[str, int]] = {
     "decision.answer": {"perHour": 20},
@@ -60,9 +60,13 @@ class PolicyError(Exception):
     """The policy is not acceptable. The message names the problem, never a secret."""
 
 
+def toolset_allowed(name: str) -> bool:
+    """Exact match against the vetted allowlist (no case folding, no trimming, no aliases)."""
+    return name in CHAT_TOOLSETS_VETTED
+
+
 def toolset_denied(name: str) -> bool:
-    n = name.strip().lower()
-    return n in DENIED_EXACT or any(part in n for part in DENIED_PARTS)
+    return not toolset_allowed(name)
 
 
 @dataclass(frozen=True)
@@ -110,13 +114,17 @@ class Policy:
                     seen.append(x)
         return seen[:MAX_LIST]
 
-    def wire(self, revision: str, dry_run: bool) -> dict[str, Any]:
-        """Body of ``action.policy`` (display data only; every request is re-checked)."""
+    def wire(self, revision: str, dry_run: bool, unavailable: frozenset[str] | set[str] = frozenset()) -> dict[str, Any]:
+        """Body of ``action.policy`` (display data only; every request is re-checked).
+
+        ``unavailable``: capabilities the policy enables but this service cannot run (live service,
+        no conditional board change / no verified chat boundary); the game sees them as disabled.
+        """
         caps: dict[str, Any] = {}
         for name in frames.CAPABILITIES:
             tier, confirm, _ = frames.ARGS[name]
             c = self.caps[name]
-            caps[name] = {"tier": tier, "confirm": confirm, "enabled": c.enabled, "limits": dict(c.limits)}
+            caps[name] = {"tier": tier, "confirm": confirm, "enabled": c.enabled and name not in unavailable, "limits": dict(c.limits)}
         return {
             "revision": revision,
             "dryRun": dry_run,
@@ -246,8 +254,10 @@ def parse(data: Any, file_hash: str = "", allow_offline: bool = False) -> Policy
             if type(ts) is not list or len(ts) > 8 or not all(type(x) is str and TOOLSET.match(x) for x in ts):
                 raise PolicyError(f"{name}.toolsets: need a list of toolset names")
             for t in ts:
-                if toolset_denied(t):
-                    raise PolicyError(f"{name}.toolsets: {t!r} is a denied toolset (shell / terminal / code / delegation class)")
+                if not toolset_allowed(t):
+                    raise PolicyError(f"{name}.toolsets: {t!r} is not a vetted read-only toolset (allowed: {', '.join(sorted(CHAT_TOOLSETS_VETTED))})")
+            if len(set(ts)) != len(ts):
+                raise PolicyError(f"{name}.toolsets: duplicate toolset names")
             toolsets = tuple(ts)
         timeout = d.get("timeoutSeconds", 120)
         if type(timeout) is not int or not 5 <= timeout <= 300:

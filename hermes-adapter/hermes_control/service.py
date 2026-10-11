@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import contextlib
 import hmac
 import logging
 import secrets
@@ -21,7 +22,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 from hermes_adapter import redact
 from hermes_adapter.server import AccessPolicy
@@ -280,7 +281,7 @@ class ControlService:
         async with self._bcast_lock:
             for c in list(self.conns):
                 if c.state == "ready":
-                    await self.send(c, "action.policy", self.policy.wire(self.revision, self.dry_run))
+                    await self.send(c, "action.policy", self.policy_wire())
                     await self.send(c, "action.state", self.state_body())
 
     async def _close(self, conn: Conn, code: int = 1008, reason: str = "closing") -> None:
@@ -454,7 +455,7 @@ class ControlService:
         self.audit.try_write("hello", peer=conn.peer, revision=self.revision, dryRun=self.dry_run)
         async with self._bcast_lock:  # the initial sequence cannot be interleaved with a broadcast
             if (await self.send(conn, "ack", {"result": {"features": ["action"]}})
-                    and await self.send(conn, "action.policy", self.policy.wire(self.revision, self.dry_run))
+                    and await self.send(conn, "action.policy", self.policy_wire())
                     and await self.send(conn, "action.state", self.state_body())):
                 conn.state = "ready"  # requests are admitted only from here on, with current policy and state delivered
 
@@ -492,6 +493,9 @@ class ControlService:
             args = frames.check_args(cap, p["args"])
         except frames.FrameError as e:
             return await refuse(f"bad arguments ({e.reason})")
+        why = self._unavailable_reason(cap, args)
+        if why:
+            return await refuse(why)
         dig = frames.digest(cap, tier, args)
         stored = self.ledger.get_claim(auuid, rid)
         if stored is not None:
@@ -581,12 +585,14 @@ class ControlService:
                 raise Refuse("card not found on an allowed board")
             if "comment" not in args and board_mod.is_running(card):
                 raise Refuse("card is running: only a comment is allowed")
+            if "comment" not in args and "title" not in args and "body" not in args:
+                raise Refuse(executors.PRIORITY_ALONE)
             return {"board": card["board"], "card": card["id"]}, None
         if cap in ("agent.chat", "agent.ask"):
             if args["agent"] not in cp.agents:
                 raise Refuse("agent not allowed")
-            if not cp.toolsets:
-                raise Refuse("chat has no enforced toolset in the policy")
+            if not cp.toolsets or not all(pol.toolset_allowed(t) for t in cp.toolsets):
+                raise Refuse("chat has no vetted read-only toolset in the policy")
             return {}, None
         if cap == "card.dispatch":
             if args["board"] not in cp.boards:
@@ -713,8 +719,10 @@ class ControlService:
         persist_error = ""
         if self.policy.lock_sets_hermes_lock:
             by = f"game:{actor['name']}/{actor['uuid'][:8]}"
-            # latch in memory FIRST: if the file cannot be written (ENOSPC, EACCES, ...) control still stays locked (F3)
-            self._latch_lock(reason or "locked from the game", by, self.now())
+            # latch in memory FIRST: if the file cannot be written (ENOSPC, EACCES, ...) control still stays locked (F3).
+            # Under the start-boundary mutex: a worker that has not spawned yet cannot start after this (review r1 R3).
+            with self._auth_mu:
+                self._latch_lock(reason or "locked from the game", by, self.now())
             ok, persist_error = self._persist_latch()
             made = ok and not was
         self.audit.try_write("game-lock", req=p["id"], actor=actor["uuid"], name=actor["name"], reason=reason,
@@ -725,21 +733,54 @@ class ControlService:
         await self.poll_state()
 
     # ---- executing ----------------------------------------------------------------------------
-    def _guarded(self, ex: executors.Executor, req: executors.ExecRequest) -> executors.ExecResult:
-        """Runs in a worker thread, immediately before the executor.
+    def unavailable(self) -> frozenset[str]:
+        """Capabilities whose executor refuses them outright (a live service: executors.live_unavailable;
+        the dry run's mock: none). The game is shown them as disabled."""
+        return frozenset(c for c in frames.CAPABILITIES if (ex := self.executors.get(c)) is None or c in ex.unavailable_caps())
 
-        The lock is checked once more, the board is read again and everything the request depended on is
-        re-validated (F1), and the request is re-authorised against the CURRENT policy (F2). The hermes CLI
-        has no conditional mutation, so a tiny window between this check and the CLI call remains (CONTROL.md).
+    def _unavailable_reason(self, cap: str, args: dict[str, Any]) -> str | None:
+        ex = self.executors.get(cap)
+        return "no executor" if ex is None else ex.unavailable(cap, args)
+
+    def policy_wire(self) -> dict[str, Any]:
+        return self.policy.wire(self.revision, self.dry_run, self.unavailable())
+
+    def _guarded(self, ex: executors.Executor, req: executors.ExecRequest) -> executors.ExecResult:
+        """Runs in a worker thread. A cheap lock check first, then the executor, which starts its command
+        (or the mock records) inside :meth:`_start_boundary`. An executor that returns without having
+        passed the boundary is treated as an unknown outcome (it must never happen; tested for every class).
         """
         if self.lock_is_set() or self.frozen:
             raise Locked()
-        self._revalidate_board(req)
-        with self._auth_mu:  # a policy reload cannot slip in between this check and the start
-            self._reauthorize(req)
+        req.started = False
+        req.start_guard = lambda: self._start_boundary(req)
+        res = ex.execute(req)
+        if not req.started:
+            raise executors.ExecUnknown("executor did not pass the start boundary; check outside the game")
+        return res
+
+    @contextlib.contextmanager
+    def _start_boundary(self, req: executors.ExecRequest) -> Iterator[None]:
+        """The execution-start boundary (review r1 R3).
+
+        Held from the last checks until the command has been spawned (``subprocess.Popen`` returned) or the
+        mock has recorded the call. Policy swaps (:meth:`reload_policy`) and the game lock latch
+        (:meth:`on_lock`) take the same mutex, so each of them is either entirely before the boundary (the
+        request is refused here) or entirely after the start. Already-started semantics: a command that was
+        spawned before a reload or lock runs to the end and its outcome is recorded with the revision it
+        started under; nothing that has not been spawned can start after a reload or game lock completed.
+        The terminal lock file is not under the mutex; it is read here, immediately before the spawn.
+        """
+        with self._auth_mu:
             if self.lock_is_set() or self.frozen:
                 raise Locked()
-        return ex.execute(req)
+            self._reauthorize(req)
+            why = self._unavailable_reason(req.capability, req.args)
+            if why:
+                raise executors.ExecRefused(why)
+            self._revalidate_board(req)
+            req.started = True
+            yield
 
     def _reauthorize(self, req: executors.ExecRequest) -> None:
         """Queued work is judged by the policy in force NOW. Raises ExecRefused."""
@@ -759,7 +800,7 @@ class ControlService:
         elif cap == "card.dispatch":
             ok = board in cp.boards and a.get("profile") in cp.profiles
         elif cap in ("agent.chat", "agent.ask"):
-            ok = a.get("agent") in cp.agents and bool(cp.toolsets)
+            ok = a.get("agent") in cp.agents and bool(cp.toolsets) and all(pol.toolset_allowed(t) for t in cp.toolsets)
         elif cap == "service.restart":
             ok = a.get("service") in pl.services
         elif cap == "cron.run":
@@ -918,6 +959,10 @@ class ControlService:
         self._tasks = [asyncio.create_task(self.tick_loop())]
         self.audit.try_write("start", host=self.host, port=self.port, revision=self.revision, dryRun=self.dry_run, protocol=PROTOCOL_VERSION,
                              devOfflineActors=self.dev_offline_actors)
+        off = sorted(c for c in self.unavailable() if self.policy.cap(c).enabled)
+        if off:  # enabled in the policy, refused by this live service (no conditional board change / no verified chat boundary)
+            self.audit.try_write("live-unavailable", capabilities=off)
+            log.warning("enabled in the policy but off on a live service: %s", ", ".join(off))
         return self.port
 
     async def stop(self) -> None:

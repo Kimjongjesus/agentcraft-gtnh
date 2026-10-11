@@ -8,8 +8,8 @@
     "card.create":     { "enabled": true, "boards": ["main"] },
     "card.edit":       { "enabled": true, "boards": ["main"] },
     "card.dispatch":   { "enabled": false, "boards": ["main"], "profiles": ["builder-a"] },
-    "agent.chat":      { "enabled": false, "agents": ["helper-a"], "toolsets": ["read-only"], "timeoutSeconds": 120 },
-    "agent.ask":       { "enabled": false, "agents": ["helper-a"], "toolsets": ["read-only"], "timeoutSeconds": 120 },
+    "agent.chat":      { "enabled": false, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 120 },
+    "agent.ask":       { "enabled": false, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 120 },
     "service.restart": { "enabled": false },
     "cron.run":        { "enabled": false }
   },

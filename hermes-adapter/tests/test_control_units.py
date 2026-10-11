@@ -167,7 +167,7 @@ class PolicyTest(unittest.TestCase):
             "unknown service key": with_(lambda d: d["services"]["service-1"].update({"shell": True})),
             "permissionApprove true": with_(lambda d: d["capabilities"]["decision.answer"].update({"permissionApprove": True})),
             "permissionApprove string": with_(lambda d: d["capabilities"]["decision.answer"].update({"permissionApprove": "false"})),
-            "denied toolset terminal": with_(lambda d: d["capabilities"]["agent.chat"].update({"toolsets": ["read-only", "terminal"]})),
+            "denied toolset terminal": with_(lambda d: d["capabilities"]["agent.chat"].update({"toolsets": ["search", "terminal"]})),
             "denied toolset shell": with_(lambda d: d["capabilities"]["agent.ask"].update({"toolsets": ["shell"]})),
             "denied toolset code": with_(lambda d: d["capabilities"]["agent.ask"].update({"toolsets": ["code_execution"]})),
             "denied toolset delegation": with_(lambda d: d["capabilities"]["agent.ask"].update({"toolsets": ["delegation"]})),
@@ -228,12 +228,15 @@ class PolicyTest(unittest.TestCase):
             with self.assertRaises(pol.PolicyError):
                 pol.load(p)
 
-    def test_denylist_catches_the_dangerous_classes(self):
-        for name in ("terminal", "shell", "bash", "code_execution", "execute_code", "delegation", "delegate_task", "process", "computer_use", "browser",
-                     "cron", "kanban", "file_write", "patch", "mcp-github", "ssh", "docker", "all", "*", "yolo"):
+    def test_chat_toolsets_are_an_allowlist_not_a_denylist(self):
+        # review r1 R2: these all reach shell / write / mutation tools inside Hermes; a name denylist let some through
+        for name in ("debugging", "file", "skills", "safe", "coding", "web", "memory", "read-only", "custom-readonly", "terminal", "shell",
+                     "code_execution", "delegation", "process", "computer_use", "browser", "cron", "cronjob", "kanban", "patch", "mcp-github",
+                     "all", "*", "hermes-cli", "Search", " search", "search ", "search,terminal"):
             self.assertTrue(pol.toolset_denied(name), name)
-        self.assertFalse(pol.toolset_denied("read-only"))
-        self.assertFalse(pol.toolset_denied("web"))
+            self.assertFalse(pol.toolset_allowed(name), name)
+        self.assertEqual(pol.CHAT_TOOLSETS_VETTED, frozenset({"search"}))
+        self.assertTrue(pol.toolset_allowed("search"))
 
 
 class ClassifyTest(unittest.TestCase):
@@ -434,32 +437,32 @@ class ExecutorArgvTest(unittest.TestCase):
         self.assertEqual(argv[:5], ["hermes", "--profile", "helper-a", "chat", "--oneshot"])
         for bad in executors.CHAT_FORBIDDEN_FLAGS:
             self.assertNotIn(bad, argv)
-        self.assertEqual(argv[argv.index("--toolsets") + 1], "read-only")
+        self.assertEqual(argv[argv.index("--toolsets") + 1], "search")
         self.assertIn("t --yolo", stdin)
         self.assertNotIn("t --yolo", argv)
         self.assertEqual(argv[argv.index("--query-file") + 1], "-")
 
     def test_chat_check_rejects_every_forbidden_shape(self):
-        good = ["hermes", "--profile", "a", "chat", "--oneshot", "--toolsets", "read-only", "--query-file", "-"]
-        executors.check_chat_argv(good, ("read-only",))
+        good = ["hermes", "--profile", "a", "chat", "--oneshot", "--toolsets", "search", "--query-file", "-"]
+        executors.check_chat_argv(good, ("search",))
         for extra in (["--yolo"], ["--resume", "abc"], ["-r", "abc"], ["--continue"], ["-c"], ["--accept-hooks"], ["--worktree"], ["--resume=abc"], ["--yolo=1"]):
             with self.assertRaises(executors.ExecRefused, msg=extra):
-                executors.check_chat_argv(good + extra, ("read-only",))
+                executors.check_chat_argv(good + extra, ("search",))
         with self.assertRaises(executors.ExecRefused):
-            executors.check_chat_argv([x for x in good if x != "--oneshot"], ("read-only",))
+            executors.check_chat_argv([x for x in good if x != "--oneshot"], ("search",))
         with self.assertRaises(executors.ExecRefused):
-            executors.check_chat_argv(good[:5] + ["--toolsets", "read-only,terminal"], ("read-only",))
+            executors.check_chat_argv(good[:5] + ["--toolsets", "search,terminal"], ("search",))
         with self.assertRaises(executors.ExecRefused):
-            executors.check_chat_argv(good[:5] + ["-t", "read-only", "--toolsets", "read-only"], ("read-only",))
+            executors.check_chat_argv(good[:5] + ["-t", "search", "--toolsets", "search"], ("search",))
         with self.assertRaises(executors.ExecRefused):
             executors.check_chat_argv(good[:5] + ["--toolsets", "terminal"], ("terminal",))
         with self.assertRaises(executors.ExecRefused):
             executors.check_chat_argv(good, ())
 
     def test_chat_toolset_comes_from_the_policy_only(self):
-        r = self.req("agent.ask", {"agent": "helper-a", "text": "x"}, **{"agent.ask": {"enabled": True, "agents": ["helper-a"], "toolsets": ["web", "memory"]}})
+        r = self.req("agent.ask", {"agent": "helper-a", "text": "x"}, **{"agent.ask": {"enabled": True, "agents": ["helper-a"], "toolsets": ["search"]}})
         argv, _, _ = executors.argv_for(r)
-        self.assertEqual(argv[argv.index("--toolsets") + 1], "web,memory")
+        self.assertEqual(argv[argv.index("--toolsets") + 1], "search")
 
     def test_run_argv_uses_no_shell_and_kills_on_timeout(self):
         with tmpdir() as d:

@@ -167,7 +167,7 @@ class BoardWriteTest(ControlCase):
         self.assertEqual(self.env.ask(c, "card.edit", {"card": "t-demo-1", "title": "-new title", "priority": 3, "body": "b"})["status"], "applied")
         calls = self.env.hermes_calls()
         self.assertEqual(calls[0]["argv"], ["kanban", "--board", "main", "comment", "--author=agentcraft-game", "t-demo-1", f"{TAG} -looks like a flag"])
-        self.assertEqual(calls[1]["argv"][:5], ["kanban", "--board", "main", "edit", "--title=-new title"])
+        self.assertEqual(calls[1]["argv"][:5], ["kanban", "--board", "main", "edit", f"--title={TAG} -new title"])
         self.assertEqual(calls[1]["argv"][-1], "t-demo-1")
         self.assertIn("--priority=3", calls[1]["argv"])
 
@@ -474,7 +474,7 @@ class ChatTest(ControlCase):
         self.assertEqual(argv[:4], ["--profile", "helper-a", "chat", "--oneshot"])
         self.assertIn("what is up --yolo", call["stdin"])
         self.assertNotIn("what is up --yolo", " ".join(argv))
-        self.assertEqual(argv[argv.index("--toolsets") + 1], "read-only")
+        self.assertEqual(argv[argv.index("--toolsets") + 1], "search")
         for bad in ("--yolo", "--resume", "-r", "--continue", "-c", "--accept-hooks", "--worktree"):
             self.assertNotIn(bad, argv)
 

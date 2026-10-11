@@ -106,8 +106,8 @@ def base_policy(env: "Env | None" = None, **over: Any) -> dict[str, Any]:
             "card.create": {"enabled": True, "boards": ["main"]},
             "card.edit": {"enabled": True, "boards": ["main"]},
             "card.dispatch": {"enabled": True, "boards": ["main"], "profiles": ["builder-a"]},
-            "agent.chat": {"enabled": True, "agents": ["helper-a"], "toolsets": ["read-only"], "timeoutSeconds": 20},
-            "agent.ask": {"enabled": True, "agents": ["helper-a"], "toolsets": ["read-only"], "timeoutSeconds": 20},
+            "agent.chat": {"enabled": True, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 20},
+            "agent.ask": {"enabled": True, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 20},
             "service.restart": {"enabled": True},
             "cron.run": {"enabled": True},
         },
@@ -150,11 +150,48 @@ class ServerThread:
             self.loop.close()
 
 
+class _GateLifted:
+    """TEST ONLY mixin. Stands in for a future Hermes that offers conditional board changes and a verified
+    chat tool boundary, so the request flows behind the live gate (argv shape, decisions, confirm tokens,
+    chat framing, limits) stay tested with the fake ``hermes``. Production never uses it: the gate itself
+    is tested with :func:`executors.build` in test_control_review_r1.py."""
+
+    def unavailable(self, capability: str, args: dict[str, Any]) -> str | None:
+        return None
+
+    def unavailable_caps(self) -> frozenset[str]:
+        return frozenset()
+
+
+class GateLiftedBoardExecutor(_GateLifted, executors.BoardExecutor):
+    pass
+
+
+class GateLiftedChatExecutor(_GateLifted, executors.ChatExecutor):
+    pass
+
+
+def gate_lifted_executors() -> dict[str, executors.Executor]:
+    b, ch = GateLiftedBoardExecutor(), GateLiftedChatExecutor()
+    m = executors.build(False)
+    for cap in m:
+        if isinstance(m[cap], executors.BoardExecutor):
+            m[cap] = b
+        elif isinstance(m[cap], executors.ChatExecutor):
+            m[cap] = ch
+    return m
+
+
 class Env:
-    """One throwaway control environment. ``start()`` runs the service; ``restart()`` simulates a new process."""
+    """One throwaway control environment. ``start()`` runs the service; ``restart()`` simulates a new process.
+
+    ``production_executors``: False (default for the flow tests) lifts the live gate with the TEST ONLY
+    executors above; True uses exactly what the CLI builds (``executors.build``).
+    """
 
     def __init__(self, policy: dict[str, Any] | None = None, dry_run: bool = False, board: Any = None, clock: Clock | None = None,
-                 audit_cls: type[Audit] = Audit) -> None:
+                 audit_cls: type[Audit] = Audit, production_executors: bool = False) -> None:
+        self.production_executors = production_executors
         self._tmp = tempfile.TemporaryDirectory(dir=os.environ.get("TMPDIR"))
         self.root = Path(self._tmp.name)
         os.chmod(self.root, 0o700)
@@ -206,9 +243,10 @@ class Env:
     def build(self) -> ControlService:
         self.ledger = Ledger(self.state / "ledger.sqlite3", self.clock, allow_in_repo=True)
         self.audit = self.audit_cls(self.audit_path, self.clock)
+        exmap = executors.build(self.dry_run) if (self.dry_run or self.production_executors) else gate_lifted_executors()
         self.svc = ControlService(
             key=self.key, policy=pol.load(self.policy_path), policy_path=self.policy_path, ledger=self.ledger, audit=self.audit,
-            lock=LockFile(self.lock_path), reader=self.board, executor_map=executors.build(self.dry_run), clock=self.clock,
+            lock=LockFile(self.lock_path), reader=self.board, executor_map=exmap, clock=self.clock,
             dry_run=self.dry_run, host="127.0.0.1", port=0,
         )
         return self.svc
@@ -282,6 +320,7 @@ class ControlCase(unittest.TestCase):
     """Base class: a fresh Env per test (override ``policy()`` / ``dry_run``)."""
 
     dry_run = False
+    production_executors = False
     autostart = True
 
     def policy(self, env: Env) -> dict[str, Any]:
@@ -292,7 +331,7 @@ class ControlCase(unittest.TestCase):
         return None
 
     def setUp(self) -> None:
-        self.env = Env(dry_run=self.dry_run)
+        self.env = Env(dry_run=self.dry_run, production_executors=self.production_executors)
         b = self.board(self.env)
         if b is not None:
             self.env.board = b
