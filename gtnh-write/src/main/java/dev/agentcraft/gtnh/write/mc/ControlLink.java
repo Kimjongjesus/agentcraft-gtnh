@@ -30,6 +30,18 @@ import dev.agentcraft.gtnh.write.proto.Sender;
  * connection sends what the server thread queued. Fail closed: when the connection is not fully
  * handshaked, {@link #send} returns null at once and nothing is kept for later; everything queued for
  * a connection dies with it. Verified messages go to {@link #inbox} for the server thread.
+ *
+ * <p>Invalidation boundary (game lock, security disarm, outbox overflow, stop): each connection is one
+ * generation ({@code Conn}). A frame may start writing only after the writer, holding that
+ * connection's {@code gate}, has seen it is not dead; invalidation flips {@code dead} under the same
+ * gate, so every frame either started before the boundary or never starts. The gate is never held
+ * across socket I/O. After the flip the outbox is emptied and the socket is aborted (closed at once,
+ * no close frame, no wait for the send monitor), which cuts a write that is blocked on backpressure.
+ * A frame dequeued but not started when the boundary passes is dropped like the rest of the outbox:
+ * nothing is sent, and its pending request is answered "unknown" when the link-down reaches the server
+ * thread. A frame whose write started before the boundary may have reached the peer (the control
+ * service applies its own lock checks); none can start after it. Nothing here waits on the writer,
+ * so a lock or disarm on the server thread returns at once even while the socket is backpressured.
  */
 public final class ControlLink implements Controller.Uplink {
 
@@ -52,6 +64,8 @@ public final class ControlLink implements Controller.Uplink {
 
         final WebSocketClient ws;
         final BlockingQueue<String> outbox = new LinkedBlockingQueue<>(64);
+        /** The send-start / invalidation boundary: {@code dead} only flips under it and a send only starts under it. Held for a flag check, never across I/O. */
+        final Object gate = new Object();
         volatile boolean ready, dead;
 
         Conn(WebSocketClient ws) {
@@ -71,6 +85,21 @@ public final class ControlLink implements Controller.Uplink {
     private volatile String note = "not started";
     private volatile boolean stopped;
     private Thread thread;
+
+    /** Test seam (package-private, null in production): sees the writer between dequeue and send-start, drops, and its exit. */
+    interface WriterProbe {
+
+        /** The writer took {@code frame} from the outbox and has not decided yet whether it may start. */
+        void dequeued(String frame);
+
+        /** {@code frame} was dequeued but the link was invalidated before it could start: it is never written. */
+        void dropped(String frame);
+
+        /** The writer thread is leaving; {@code error} is what ended it, null when it left because the link was dead. */
+        void exited(Throwable error);
+    }
+
+    volatile WriterProbe probe;
 
     public ControlLink(String url, String keyFile, long processStartMs) {
         this.url = url;
@@ -145,9 +174,10 @@ public final class ControlLink implements Controller.Uplink {
     }
 
     /**
-     * Atomic invalidation (game lock, security disarm): the connection is marked dead first (the writer
-     * never dequeues or sends after that), the outbox is emptied, the socket is closed. A frame that is
-     * already being written to the socket is on the wire; nothing queued behind it ever is.
+     * Atomic invalidation (game lock, security disarm): the connection is marked dead under its send gate
+     * (no frame starts after that), the outbox is emptied, the socket is aborted. A frame whose write
+     * started before may have reached the peer; nothing queued, or dequeued but not started, ever does.
+     * Never blocks: safe on the server thread while the writer is stuck on a full socket.
      */
     @Override
     public void invalidate() {
@@ -155,11 +185,20 @@ public final class ControlLink implements Controller.Uplink {
         if (c != null) kill(c);
     }
 
-    private void kill(Conn c) {
-        c.dead = true;
-        c.ready = false;
+    private static void kill(Conn c) {
+        synchronized (c.gate) {
+            c.dead = true;
+            c.ready = false;
+        }
         c.outbox.clear();
-        c.ws.close();
+        c.ws.abort(); // no close frame, no wait for the send monitor: a write blocked on backpressure fails now
+    }
+
+    /** The send-start decision: true (the frame may be written) only while this connection is not dead. */
+    private static boolean mayStart(Conn c) {
+        synchronized (c.gate) {
+            return !c.dead;
+        }
     }
 
     private void run() {
@@ -265,13 +304,25 @@ public final class ControlLink implements Controller.Uplink {
     }
 
     private void writer(Conn c) {
+        Throwable error = null;
         try {
             while (!c.dead) {
                 String f = c.outbox.poll(1, TimeUnit.SECONDS);
-                if (f != null && !c.dead) c.ws.sendText(f); // dead is set before the outbox is cleared: a late poll result is dropped here
+                if (f == null) continue;
+                WriterProbe p = probe;
+                if (p != null) p.dequeued(f);
+                if (!mayStart(c)) { // invalidated after the dequeue: dropped like the rest of the outbox
+                    if (p != null) p.dropped(f);
+                    break;
+                }
+                c.ws.sendText(f); // started before the boundary; an abort from here on fails this write
             }
         } catch (IOException | InterruptedException | RuntimeException e) {
+            error = e;
             kill(c);
+        } finally {
+            WriterProbe p = probe;
+            if (p != null) p.exited(error);
         }
     }
 

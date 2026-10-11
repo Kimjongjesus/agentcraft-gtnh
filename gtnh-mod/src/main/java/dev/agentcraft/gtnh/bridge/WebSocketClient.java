@@ -246,6 +246,25 @@ public final class WebSocketClient {
         return buf;
     }
 
+    /**
+     * Hard abort, for a caller that must not wait: marks the client closed and closes the socket at once.
+     * It takes no lock (a send blocked on a full socket holds the send monitor; this does not wait for
+     * it), sends no close frame, and sets SO_LINGER 0 so bytes still in the local send buffer are
+     * discarded and the peer sees a reset. A thread blocked in a socket write or read gets an
+     * IOException; a send that has not reached its closed-check yet fails with "closed". Idempotent;
+     * {@link #close} after it does nothing.
+     */
+    public void abort() {
+        closed = true;
+        try {
+            socket.setSoLinger(true, 0);
+        } catch (IOException | RuntimeException ignored) {}
+        try {
+            socket.close();
+        } catch (IOException ignored) {}
+    }
+
+    /** Graceful close for normal shutdown: sends a close frame (waiting for any send in progress), then closes the socket. */
     public void close() {
         if (closed) return;
         if (out != null) {

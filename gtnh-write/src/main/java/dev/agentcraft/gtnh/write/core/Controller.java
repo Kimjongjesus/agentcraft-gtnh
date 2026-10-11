@@ -72,7 +72,10 @@ public final class Controller {
          * Fail-closed invalidation: every frame queued but not yet on the wire is discarded and can no
          * longer be sent, and the connection is closed (the control service then voids every open
          * confirmation of the connection). Idempotent. The link reconnects by itself; a game lock is
-         * announced again on the new connection.
+         * announced again on the new connection. Runs on the server thread, so it must never block: not
+         * on a send in progress, not on a full socket (the real link aborts the socket instead of a
+         * graceful close). A frame that started writing before the call may still reach the peer;
+         * none starts after it.
          */
         void invalidate();
     }
