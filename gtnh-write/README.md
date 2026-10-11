@@ -91,10 +91,21 @@ kills the override until restart, so nothing real can run under it.
 
 - **F4, queued frames after a lock or disarm.** `Controller.Uplink.invalidate()` is called on the game lock and on
   every armed -> disarmed transition (and whenever a Confirm prompt is open): `ControlLink` marks the connection
-  dead first, empties the outbox and closes the socket, so nothing queued before the lock can reach the wire after
-  it. The link reconnects by itself and announces a held lock first thing (`action.lock`). The control service's
+  dead under its send gate, empties the outbox and **aborts** the socket (high-risk review r1, R4: `WebSocketClient.abort()`
+  closes at once with SO_LINGER 0, sends no close frame and takes no lock, so a writer blocked on a full socket
+  fails at once and the server thread never waits for it). The writer re-checks the gate after every dequeue, so
+  a frame still queued, or dequeued but not past the gate, is never written; a frame already past the gate can
+  leave only until the abort, i.e. before `invalidate()` returns; after it returns no byte leaves on that
+  connection. A protocol violation seen by the reader also aborts instead of closing gracefully. The link
+  reconnects by itself and announces a held lock first thing (`action.lock`). The control service's
   connection-close cleanup voids every token of the old connection. Checks: `ControllerCheck.uplinkInvalidation`
-  (queued request, queued confirm, closing link, security disarm; staying disarmed does not bounce the link).
+  (queued request, queued confirm, closing link, security disarm; staying disarmed does not bounce the link) and
+  `LinkCheck` (the real `ControlLink` and `WebSocketClient` over loopback with the signed handshake: lock, disarm
+  and outbox overflow return within 500 ms while the writer is blocked mid-write on a peer that never reads; a
+  frame held on latches between dequeue and send start is never written after a lock; `abort()` frees a stuck
+  writer and reader and sends no close frame). Residual: the reader's reply to a server close frame is still a
+  graceful close, which can wait for a stuck writer; it runs on the link thread, never the server thread, and the
+  next lock, disarm or outbox overflow aborts it.
 - **F5, lock file.** `WriteLock.load` reads attributes with `NOFOLLOW_LINKS`; only `NoSuchFileException` means
   unlocked. Access denied, any other I/O error, a directory or other non-regular file, and a symlink (dangling or
   not) latch locked. A lock already held in memory still survives a vanished file. Checks: `HardeningCheck.lockFile`.

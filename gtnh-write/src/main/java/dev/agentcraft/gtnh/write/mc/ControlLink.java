@@ -32,16 +32,22 @@ import dev.agentcraft.gtnh.write.proto.Sender;
  * a connection dies with it. Verified messages go to {@link #inbox} for the server thread.
  *
  * <p>Invalidation boundary (game lock, security disarm, outbox overflow, stop): each connection is one
- * generation ({@code Conn}). A frame may start writing only after the writer, holding that
- * connection's {@code gate}, has seen it is not dead; invalidation flips {@code dead} under the same
- * gate, so every frame either started before the boundary or never starts. The gate is never held
- * across socket I/O. After the flip the outbox is emptied and the socket is aborted (closed at once,
- * no close frame, no wait for the send monitor), which cuts a write that is blocked on backpressure.
- * A frame dequeued but not started when the boundary passes is dropped like the rest of the outbox:
- * nothing is sent, and its pending request is answered "unknown" when the link-down reaches the server
- * thread. A frame whose write started before the boundary may have reached the peer (the control
- * service applies its own lock checks); none can start after it. Nothing here waits on the writer,
- * so a lock or disarm on the server thread returns at once even while the socket is backpressured.
+ * generation ({@code Conn}). Invalidation flips {@code dead} under the connection's {@code gate},
+ * empties the outbox and then aborts the socket (closed at once, SO_LINGER 0, no close frame, no wait
+ * for the send monitor). The writer checks {@code dead} under the same gate after each dequeue and
+ * before it hands the frame to the socket; the gate is never held across socket I/O. Precisely:
+ * <ul>
+ * <li>a frame still in the outbox, or dequeued but not past the gate check when {@code dead} flips,
+ *     is never written; its pending request is answered "unknown" when the link-down reaches the
+ *     server thread;</li>
+ * <li>a frame that passed the gate check just before the flip races the abort: its bytes may leave
+ *     only until the abort closes the socket, i.e. while {@link #invalidate} is still running, so it
+ *     is ordered before the invalidation (the control service applies its own lock checks to it);</li>
+ * <li>once {@link #invalidate} has returned, no byte can leave on that connection: the socket is
+ *     closed and every later frame belongs to a new connection that starts with a fresh handshake.</li>
+ * </ul>
+ * Nothing here waits on the writer, so a lock or disarm on the server thread returns at once even
+ * while the socket is backpressured.
  */
 public final class ControlLink implements Controller.Uplink {
 
@@ -174,9 +180,10 @@ public final class ControlLink implements Controller.Uplink {
     }
 
     /**
-     * Atomic invalidation (game lock, security disarm): the connection is marked dead under its send gate
-     * (no frame starts after that), the outbox is emptied, the socket is aborted. A frame whose write
-     * started before may have reached the peer; nothing queued, or dequeued but not started, ever does.
+     * Invalidation (game lock, security disarm): the connection is marked dead under its send gate, the
+     * outbox is emptied, the socket is aborted. Nothing queued, or dequeued but not past the gate, is ever
+     * written; a frame already past the gate can leave only until the abort below, i.e. before this
+     * returns. After it returns no byte leaves on that connection (see the class comment).
      * Never blocks: safe on the server thread while the writer is stuck on a full socket.
      */
     @Override

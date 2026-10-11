@@ -1,6 +1,6 @@
 # Card 7: the write path (design; built on branch, nothing enabled)
 
-Status: **built, awaiting review; nothing is enabled.** The owner approved this design with the
+Status: **built; high-risk review r1 fixes in; nothing is enabled.** The owner approved this design with the
 proposed defaults ("Card 7 with proposed defaults"). The implementation follows it: the wire
 contract is pinned in [action-protocol.md](action-protocol.md), the control service is
 `hermes-adapter/hermes_control/` ([CONTROL.md](../hermes-adapter/CONTROL.md)) and the write module
@@ -8,6 +8,13 @@ is the separate `gtnh-write/` jar ([README](../gtnh-write/README.md)). The shipp
 (every capability off, no actor), and the example policy uses placeholders only. Section 10 below
 records which option was taken for each open question. The rest of this document is the design as
 approved; the text below this paragraph still describes the state before card 7 was built.
+
+**Narrower than designed, after review r1.** A live control service refuses, whatever the policy
+says, the capabilities whose board change the Hermes command line cannot make conditionally
+(`decision.answer`, `card.dispatch`, and `card.edit` of a title, body or priority) and game chat
+(`agent.chat`, `agent.ask`), whose read-only tool boundary cannot be verified from this repository.
+Comments, new cards, restart and run stay possible live. The dry run keeps every screen working with
+mock executors. What would lift each restriction is in CONTROL.md ("Live service").
 
 An independent security review of the
 first draft has been folded in (signed handshake, nonce and idempotency rules, confirm-token
@@ -478,7 +485,7 @@ is used; where it did not, the most restrictive option was chosen and can be cha
 | --- | --- | --- |
 | 1 | proposed: `Deny` only (with an optional note); `Approve` is always refused | `decision.answer.permissionApprove` must be `false`; `true` stops the service |
 | 2 | as written: a single press, limits as in section 3 | the restart / run buttons; limits in `docs/action-protocol.md` 4.1 |
-| 3 | proposed: read-only toolset enforced by Hermes; because that enforcement cannot be proven inside this repository, chat **ships disabled** | `agent.chat` / `agent.ask` `enabled: false`; a denied toolset name stops the service |
+| 3 | proposed: read-only toolset enforced by Hermes; because that enforcement cannot be proven inside this repository, chat **ships disabled**, and after review r1 a live service refuses chat in code whatever the policy says | `agent.chat` / `agent.ask` `enabled: false`; toolsets are an allowlist (`search` only), any other name stops the service; live refusal in `executors.live_unavailable` |
 | 4 | chosen (restrictive): plaintext never leaves the host; the control service binds loopback, use an SSH or VPN tunnel | `--insecure-lan-bind` is the only way to bind elsewhere |
 | 5 | chosen (restrictive): one panic button. The game write lock also locks the edit tool, and also sets the Hermes-side lock (unlocking needs the terminal) | `lockAlsoLocksEdit=true` in the module config; `lockSetsHermesLock: true` in the policy |
 | 6 | as instructed: the arming gate is QA'd on an online-mode test server; screenshots use a dev override that works only on a loopback-bound server against a control service in dry-run mode (mock executors, nothing runs) | JVM property `agentcraft.write.devOverride=loopback-dry-run`; `--dry-run` (plus `--dev-offline-actors` for the offline dev player) |

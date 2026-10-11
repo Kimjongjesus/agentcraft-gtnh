@@ -29,6 +29,7 @@ log = logging.getLogger("hermes_control")
 DEFAULT_PORT = 7879
 LOCK_NAME = "hermes.lock"
 LEDGER_NAME = "ledger.sqlite3"
+DRY_RUN_LEDGER_NAME = "ledger-dry-run.sqlite3"  # never shared with the live ledger: a replay always reports the mode it ran in
 AUDIT_NAME = "hermes-control-audit.jsonl"
 
 
@@ -89,7 +90,7 @@ def build(args: argparse.Namespace, allow_in_repo: bool = False, clock: Any = No
     except safety.UnsafePath as e:
         raise StartupRefused(str(e)) from None
     try:
-        ledger = Ledger(state_dir / LEDGER_NAME, clock or (lambda: int(time.time() * 1000)), allow_in_repo=allow_in_repo)
+        ledger = Ledger(state_dir / (DRY_RUN_LEDGER_NAME if args.dry_run else LEDGER_NAME), clock or (lambda: int(time.time() * 1000)), allow_in_repo=allow_in_repo)
         audit = Audit(audit_path)
     except (LedgerError, AuditError) as e:
         raise StartupRefused(str(e)) from None

@@ -223,9 +223,13 @@ public final class WebSocketClient {
         }
     }
 
-    /** A protocol violation: the connection is closed (the peer is not trusted any more) and the read fails. */
+    /**
+     * A protocol violation: the peer is not trusted any more, so the connection is aborted (no close frame:
+     * a graceful close would wait for the send monitor, which a writer stuck on a full socket holds) and the
+     * read fails.
+     */
     private void fail(String why) throws IOException {
-        close();
+        abort();
         throw new IOException(why);
     }
 

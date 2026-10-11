@@ -147,6 +147,11 @@ class ControlService:
         max_connections: int = MAX_CONNECTIONS,
         dev_offline_actors: bool = False,
     ) -> None:
+        # The execution mode and the executors must agree (second-opinion review): a dry-run service only ever has
+        # mock executors and a live one never has a mock, so dryRun on the wire always tells the truth.
+        mocks = [isinstance(ex, executors.MockExecutor) for ex in executor_map.values()]
+        if (dry_run and not all(mocks)) or (not dry_run and any(mocks)):
+            raise ValueError("executor map does not match the execution mode (dry run = mocks only, live = no mocks)")
         self.key = key
         self.policy = policy
         self.policy_path = policy_path
@@ -720,9 +725,11 @@ class ControlService:
         if self.policy.lock_sets_hermes_lock:
             by = f"game:{actor['name']}/{actor['uuid'][:8]}"
             # latch in memory FIRST: if the file cannot be written (ENOSPC, EACCES, ...) control still stays locked (F3).
-            # Under the start-boundary mutex: a worker that has not spawned yet cannot start after this (review r1 R3).
-            with self._auth_mu:
-                self._latch_lock(reason or "locked from the game", by, self.now())
+            # Every worker that enters the start boundary from now on sees the latch and is refused; the drain below
+            # waits (in a helper thread, never blocking the event loop) for a worker already inside it to finish its
+            # spawn, so once this handler goes on, nothing that had not started can start (review r1 R3).
+            self._latch_lock(reason or "locked from the game", by, self.now())
+            await asyncio.to_thread(self._drain_start_boundary)
             ok, persist_error = self._persist_latch()
             made = ok and not was
         self.audit.try_write("game-lock", req=p["id"], actor=actor["uuid"], name=actor["name"], reason=reason,
@@ -759,14 +766,19 @@ class ControlService:
             raise executors.ExecUnknown("executor did not pass the start boundary; check outside the game")
         return res
 
+    def _drain_start_boundary(self) -> None:
+        """Returns once no worker is inside the start boundary (a worker entering later re-checks the lock)."""
+        with self._auth_mu:
+            pass
+
     @contextlib.contextmanager
     def _start_boundary(self, req: executors.ExecRequest) -> Iterator[None]:
         """The execution-start boundary (review r1 R3).
 
         Held from the last checks until the command has been spawned (``subprocess.Popen`` returned) or the
-        mock has recorded the call. Policy swaps (:meth:`reload_policy`) and the game lock latch
-        (:meth:`on_lock`) take the same mutex, so each of them is either entirely before the boundary (the
-        request is refused here) or entirely after the start. Already-started semantics: a command that was
+        mock has recorded the call. Policy swaps (:meth:`_swap_policy`) take the same mutex and the game lock
+        (:meth:`on_lock`) latches first and then drains it, so each of them is either entirely before the
+        boundary (the request is refused here) or entirely after the start. Already-started semantics: a command that was
         spawned before a reload or lock runs to the end and its outcome is recorded with the revision it
         started under; nothing that has not been spawned can start after a reload or game lock completed.
         The terminal lock file is not under the mutex; it is read here, immediately before the spawn.
@@ -923,27 +935,46 @@ class ControlService:
             except Exception as e:  # noqa: BLE001
                 log.error("tick failed: %s", type(e).__name__)
 
-    def reload_policy(self) -> bool:
-        """SIGHUP: re-read the policy. Valid -> swap, bump the revision, void tokens. Invalid -> keep the old one."""
+    def _load_new_policy(self) -> pol.Policy | None:
         if self.policy_path is None:
-            return False
+            return None
         try:
-            new = pol.load(self.policy_path, allow_offline=self.dev_offline_actors)
+            return pol.load(self.policy_path, allow_offline=self.dev_offline_actors)
         except pol.PolicyError as e:
             self.audit.try_write("policy-reload-failed", reason=str(e))
             log.error("policy reload refused: %s", e)
-            return False
-        with self._auth_mu:  # swap + revision bump are one step as seen by a worker about to start queued work
+            return None
+
+    def _swap_policy(self, new: pol.Policy) -> None:
+        """Swap + revision bump as ONE step under the start-boundary mutex: a worker inside the boundary
+        finishes its start first (it was authorised under the old policy and has started); every worker that
+        has not entered it yet re-authorises against the new revision and is refused (review r1 R3)."""
+        with self._auth_mu:
             self.policy = new
             self.reload_n += 1
             self.revision = self._revision()
+
+    def _after_swap(self) -> None:
         self.drop_tokens(None)
         self.audit.try_write("policy-reload", revision=self.revision)
+
+    def reload_policy(self) -> bool:
+        """Re-read the policy. Valid -> swap, bump the revision, void tokens. Invalid -> keep the old one."""
+        new = self._load_new_policy()
+        if new is None:
+            return False
+        self._swap_policy(new)
+        self._after_swap()
         return True
 
     async def reload_and_broadcast(self) -> None:
-        if self.reload_policy():
-            await self.broadcast_policy()
+        """SIGHUP. The swap waits for the start boundary in a helper thread, never blocking the event loop."""
+        new = self._load_new_policy()
+        if new is None:
+            return
+        await asyncio.to_thread(self._swap_policy, new)
+        self._after_swap()
+        await self.broadcast_policy()
 
     # ---- lifecycle ----------------------------------------------------------------------------
     def check_upgrade(self, req: UpgradeRequest) -> str | None:

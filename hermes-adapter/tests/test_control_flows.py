@@ -151,7 +151,7 @@ class BoardWriteTest(ControlCase):
         [call] = self.env.hermes_calls()
         self.assertEqual(call["argv"], [
             "kanban", "--board", "main", "create", "--triage", "--created-by=agentcraft-game", f"--idempotency-key=agentcraft-game:{ACTOR}:mk-1",
-            "--priority=5", "--body-file", "-", "--json", "A new placeholder card"])
+            "--priority=5", "--body-file", "-", "--json", f"{TAG} A new placeholder card"])
         self.assertTrue(call["stdin"].startswith(TAG + "\n\n- starts with a dash"))
         self.assertNotIn("--assignee", call["argv"])
 

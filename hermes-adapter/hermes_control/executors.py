@@ -147,7 +147,7 @@ def argv_for(req: ExecRequest) -> tuple[list[str], str | None, int]:
         argv = kanban(prog, a["board"], "create", "--triage", "--created-by=agentcraft-game", f"--idempotency-key={key}")
         if "priority" in a:
             argv.append(f"--priority={a['priority']}")
-        argv += ["--body-file", "-", "--json", title]
+        argv += ["--body-file", "-", "--json", f"{t} {title}"]  # the tag leads the title too (it also keeps the positional from looking like an option)
         return argv, f"{t}\n\n{a.get('body', '')}".rstrip() + "\n", KANBAN_TIMEOUT
     if cap == "card.edit":
         board, card = req.prep["board"], req.prep["card"]

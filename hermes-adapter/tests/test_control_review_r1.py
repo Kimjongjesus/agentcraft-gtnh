@@ -10,18 +10,20 @@ checks ("the reload has NOT finished while the worker is inside the boundary").
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import copy
 import dataclasses
 import threading
+import time
 import unittest
 from unittest import mock
 
-from test_control_common import ACTOR, ControlCase, base_policy
+from test_control_common import ACTOR, ControlCase, Env, base_policy
 
 from hermes_control import classify, executors, frames, policy as pol
-from hermes_control.lock import set_lock
-from hermes_control.service import Locked
+from hermes_control.lock import LockFile, set_lock
+from hermes_control.service import ControlService, Locked
 
 NAME = "TestPlayer"
 TAG = executors.tag(NAME, ACTOR)
@@ -601,6 +603,70 @@ class R3ServiceInterleavingTest(ControlCase):
         self.assertEqual(len(env.hermes_calls()), 1)
         self.assertTrue(svc.lock_is_set())
 
+    # ---- second-opinion P3: the loop never blocks behind a worker inside the boundary ----------------------
+    def test_sighup_reload_waits_for_the_boundary_without_blocking_the_event_loop(self):
+        svc, env = self.env.svc, self.env
+        old_rev = svc.revision
+        inside, release, patcher = self.hold_boundary()
+        with patcher:
+            c = env.client()
+            sent = c.request("card.create", {"board": "main", "title": "Placeholder card"})
+            self.assertTrue(inside.wait(5))
+            fut = asyncio.run_coroutine_threadsafe(svc.reload_and_broadcast(), env.st.loop)
+            other = env.client()  # a full handshake needs the loop: it completes while the worker is still held
+            self.assertFalse(fut.done())
+            self.assertEqual(svc.revision, old_rev)
+            other.close()
+            release.set()
+            fut.result(5)
+            res = final(env, c, sent["id"])
+        self.assertEqual(res["status"], "applied")
+        self.assertNotEqual(svc.revision, old_rev)
+
+    def test_game_lock_latches_at_once_and_drains_without_blocking_the_event_loop(self):
+        svc, env = self.env.svc, self.env
+        inside, release, patcher = self.hold_boundary()
+        with patcher:
+            c = env.client()
+            sent = c.request("card.create", {"board": "main", "title": "Placeholder card"})
+            self.assertTrue(inside.wait(5))
+            locker = env.client()
+            locker.send("action.lock", {"actor": locker.actor, "reason": "panic"})
+            deadline = time.time() + 5
+            while not svc.lock_is_set() and time.time() < deadline:
+                time.sleep(0.02)
+            self.assertTrue(svc.lock_is_set())  # latched while the worker is still inside
+            # the loop is free while the lock handler drains: another request on the first connection is
+            # answered at once, refused by the latch
+            r2 = env.ask(c, "card.create", {"board": "main", "title": "During the drain"})
+            self.assertEqual((r2["status"], r2["error"]), ("refused", "write lock is set"))
+            release.set()
+            res = final(env, c, sent["id"])
+        self.assertEqual(res["status"], "applied")  # it had passed its checks inside the boundary: already started
+        r = env.ask(c, "card.create", {"board": "main", "title": "After the lock"})
+        self.assertEqual((r["status"], r["error"]), ("refused", "write lock is set"))
+        self.assertEqual(len(env.hermes_calls()), 1)
+
+
+class ExecutionModeInvariantTest(unittest.TestCase):
+    """Second-opinion P3: dryRun on the wire must match the executors (no live mock, no real executor in a dry run)."""
+
+    def test_mismatched_executor_maps_are_refused(self):
+        env = Env()
+        self.addCleanup(env.close)
+        env.build()  # sane: live + real executors
+        env.svc._pool.shutdown(wait=False)
+        live_with_mock = executors.build(True)
+        dry_with_real = executors.build(False)
+        mixed = {**executors.build(False), "card.create": executors.MockExecutor()}
+        for dry, m in ((False, live_with_mock), (True, dry_with_real), (False, mixed), (True, mixed)):
+            with self.assertRaises(ValueError, msg=(dry, type(m["card.create"]).__name__)):
+                ControlService(key=env.key, policy=pol.load(env.policy_path), policy_path=env.policy_path, ledger=env.ledger, audit=env.audit,
+                               lock=LockFile(env.lock_path), reader=env.board, executor_map=m, dry_run=dry)
+
+    def test_dry_run_and_live_never_share_a_ledger(self):
+        from hermes_control import cli
+        self.assertNotEqual(cli.LEDGER_NAME, cli.DRY_RUN_LEDGER_NAME)
 
 # ---- R5 ------------------------------------------------------------------------------------------------------------
 

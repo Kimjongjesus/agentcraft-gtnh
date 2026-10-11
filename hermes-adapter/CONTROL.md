@@ -27,7 +27,7 @@ adapter's WebSocket server and privacy filter. Wire contract (normative):
 | --- | --- | --- |
 | `--policy` | required | JSON, see below. Re-read on `SIGHUP` |
 | `--key-file` | required | one line of >= 64 hex characters (>= 32 bytes), `#` comments allowed. There is no flag for the key itself |
-| `--state-dir` | `$AGENTCRAFT_CONTROL_STATE`, else `~/.local/state/agentcraft-gtnh/control` | holds `ledger.sqlite3` (0600) and, by default, `hermes.lock` |
+| `--state-dir` | `$AGENTCRAFT_CONTROL_STATE`, else `~/.local/state/agentcraft-gtnh/control` | holds the ledger (0600; `ledger.sqlite3` live, `ledger-dry-run.sqlite3` with `--dry-run`, never shared, so a replay always reports the mode it ran in) and, by default, `hermes.lock` |
 | `--lock-file` | `<state-dir>/hermes.lock` | exists or unreadable = locked |
 | `--audit-file` | `hermes-control-audit.jsonl` next to the policy | append-only JSON lines, 0600, rolls at 8 MiB keeping one `.1` |
 | `--bind` / `--port` | `127.0.0.1` / `7879` | loopback only. Another address needs `--insecure-lan-bind` (plaintext on the LAN; use an SSH or VPN tunnel instead). Wildcards (`0.0.0.0`, `::`) are always refused |
@@ -38,7 +38,7 @@ adapter's WebSocket server and privacy filter. Wire contract (normative):
 | `--dev-offline-actors` | off | **QA only.** Lets `policy.actors` name offline (version 3) UUIDs, which an offline-mode dev game server hands out. Refused unless `--dry-run` is also given **and** the bind is loopback (`127.0.0.0/8`, `::1`, `localhost`); the start-up line says `DEV-OFFLINE-ACTORS`, the `start` audit record carries `devOfflineActors: true`, and `action.policy` keeps `dryRun: true`. Without the flag a version 3 actor keeps the policy from loading (also on `SIGHUP`). Only version 3 with a valid variant is added; nothing else about actor checking changes. Never use it with a real board |
 
 The service **refuses to start** (exit status 2, reason on stderr) when: the policy has an unknown
-key or capability, `permissionApprove` is `true`, or a chat toolset has a denied name; the policy
+key or capability, `permissionApprove` is `true`, or a chat toolset is not on the vetted allowlist; the policy
 file, key file or state / lock / audit directory is not owned by the running user or is group/other
 writable; the key file is group/other readable (or is a symlink, too short, not hex); the state
 directory, lock file or audit log would live inside the git checkout; the audit log or ledger
@@ -73,8 +73,8 @@ anywhere stops the service. Capabilities are off unless `"enabled": true`.
     "card.create":     { "enabled": true, "boards": ["main"] },
     "card.edit":       { "enabled": true, "boards": ["main"] },
     "card.dispatch":   { "enabled": false, "boards": ["main"], "profiles": ["builder-a"] },
-    "agent.chat":      { "enabled": false, "agents": ["helper-a"], "toolsets": ["read-only"], "timeoutSeconds": 120 },
-    "agent.ask":       { "enabled": false, "agents": ["helper-a"], "toolsets": ["read-only"], "timeoutSeconds": 120 },
+    "agent.chat":      { "enabled": false, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 120 },
+    "agent.ask":       { "enabled": false, "agents": ["helper-a"], "toolsets": ["search"], "timeoutSeconds": 120 },
     "service.restart": { "enabled": false },
     "cron.run":        { "enabled": false }
   },
@@ -91,7 +91,7 @@ anywhere stops the service. Capabilities are off unless `"enabled": true`.
 | `decision.answer.permissionApprove` | must be `false` (open question 1). `true` makes the service refuse to start ("not supported"): permission halts can only be **denied** from the game |
 | `decision.answer.handoffAnswerable` | default `false` (open question 10): demo-ready / review / REVISE style decisions are read-only from the game |
 | `boards`, `profiles`, `agents` | allowlists of names (`[A-Za-z0-9][A-Za-z0-9._:-]*`, <= 64, never a leading `-`, because names end up in argv). A capability that is enabled with an empty allowlist is a start-up error |
-| `agent.*.toolsets` | the toolset names handed to `hermes chat --toolsets`. A name that is, or contains, `terminal`, `shell`, `bash`, `exec`, `code`, `delegat`, `subagent`, `process`, `computer`, `browser`, `cron`, `kanban`, `yolo`, `sudo`, `ssh`, `mcp`, `patch`, `write`, `edit`, `docker`, `git`, `all`, ... stops the service from starting (denylist in `policy.py`) |
+| `agent.*.toolsets` | the toolset names handed to `hermes chat --toolsets`. An **allowlist**: only names in `policy.CHAT_TOOLSETS_VETTED` (today just `search`, whose static closure in the Hermes toolset table is `web_search` alone) are accepted; any other name, including custom ones and look-alikes, stops the service from starting. A name is only a label (`debugging`, `file`, `skills`, `safe`, `coding` all reach shell or write tools), which is why a denylist was not enough. Live chat stays off regardless (see "Live service" below) |
 | `services.<name>.argv` | the **only** command `service.restart` runs for that name; run without a shell. `timeoutSeconds` 1..600 |
 | `jobs` | names `cron.run` may pass to `hermes cron run` |
 | `capabilities.<name>.limits` | may only **tighten** the defaults (`perMinute`, `perHour`, `perTargetCount`, `perTargetSeconds`); a looser value stops the service from starting |
@@ -116,8 +116,8 @@ idempotency key `agentcraft-game:<actor uuid>:<request id>`.
 | capability | command |
 | --- | --- |
 | `decision.answer` | `hermes kanban --board B unblock --reason=<tagged answer> CARD` (the same "comment, then unblock" an owner answer makes) |
-| `card.create` | `hermes kanban --board B create --triage --created-by=agentcraft-game --idempotency-key=K [--priority=N] --body-file - --json TITLE` (body on stdin) |
-| `card.edit` | `... comment --author=agentcraft-game CARD <tagged text>`, or `... edit [--title=T] [--body=B] [--priority=N] CARD` (refused while the card is running) |
+| `card.create` | `hermes kanban --board B create --triage --created-by=agentcraft-game --idempotency-key=K [--priority=N] --body-file - --json "<tag> TITLE"` (body on stdin, tagged too) |
+| `card.edit` | `... comment --author=agentcraft-game CARD <tagged text>`, or `... edit [--title=<tag> T] [--body=<tag>\n\nB] [--priority=N] CARD` (refused while the card is running). The game tag is part of the new title and body text itself; a priority change alone is refused (it carries no text that could hold the tag) |
 | `card.dispatch` | after the Confirm: `hermes kanban --board B assign CARD PROFILE`; the dispatcher starts it |
 | `agent.chat`, `agent.ask` | `hermes --profile AGENT chat --oneshot --quiet --query-file - --toolsets <policy toolsets> --source tool --max-turns 8 --run-budget N` with the text on stdin. One-shot only: never `--yolo`, never `--resume`/`--continue`, never another session; the argv is checked again in code before it runs |
 | `service.restart` | the policy's `services.<name>.argv` |
@@ -126,14 +126,32 @@ idempotency key `agentcraft-game:<actor uuid>:<request id>`.
 A command that did not run or exited non-zero is `refused`; one that timed out is `unknown` (the work
 may have happened), is never re-run, and the game says "check outside the game".
 
-### Chat ships disabled (open question 3)
+### Live service: what stays off until Hermes can do it safely
 
-Enforcement of a read-only toolset inside Hermes cannot be proven from this repository. Game chat
-therefore stays `enabled: false` until the owner has verified, on a test copy, that the toolset named
-in the policy really has no shell, terminal, code execution, file writes or delegation. The code side
-of the boundary is tested: the argv never contains `--yolo`, `--resume`, `--continue`,
-`--accept-hooks`, `--worktree`, the program position is always the policy's, the toolset is exactly
-the policy's, and a policy toolset with a denied name keeps the service from starting. The reply is
+The table above is what the executors would run. A **live** service (no `--dry-run`) refuses some of
+it outright, before anything runs, whatever the policy says; `action.policy` shows those capabilities
+as disabled and the start-up writes a `live-unavailable` audit record when the policy enables one:
+
+| refused live | why | what would lift it |
+| --- | --- | --- |
+| `decision.answer`, `card.dispatch`, `card.edit` with a title / body / priority | the Hermes command line has no conditional board change: `kanban unblock`, `assign` and `edit` act on whatever the card is when the command runs, so a re-check before the call cannot stop a stale answer from releasing a **replacement** halt (a question replaced by a permission), an assignment of changed work, or an edit of a card that just started running | a Hermes operation that checks the expected decision event / card revision / status in the same transaction as the change; an executor that uses it overrides `Executor.unavailable` |
+| `agent.chat`, `agent.ask` | the read-only boundary is a property of the agent's effective tool closure inside Hermes (toolset includes, plugin- and MCP-registered tools), which cannot be verified from this repository | a verified effective-closure check against an explicit read-only allowlist |
+
+Comments (`card.edit` with `comment`), `card.create` (always in triage), `service.restart` and
+`cron.run` do not depend on board state and stay available live. The refusal is made three times:
+at admission, inside the execution-start boundary and in the real executor itself. The dry run's mock
+executor keeps every capability (it executes nothing), so the screens can still be exercised; a dry
+run therefore shows features a live service refuses. The service refuses to start with an executor
+map that does not match its mode (a mock in a live service, a real executor in a dry run).
+
+### Chat is off on a live service (open question 3)
+
+Enforcement of a read-only toolset inside Hermes cannot be proven from this repository, so a live
+service refuses `agent.chat` and `agent.ask` in code (previous section), and the shipped policies keep
+them `enabled: false` too. The code side of the boundary is still tested for the day it is lifted:
+the argv never contains `--yolo`, `--resume`, `--continue`, `--accept-hooks`, `--worktree`, the
+program position is always the policy's, the toolset is exactly the policy's and must be on the vetted
+allowlist (unknown or custom names keep the service from starting). The reply is
 filtered as a whole with the adapter's privacy filter (secrets, personal notes, addresses), capped at
 6000 characters, then sent as `action.chat` frames of complete paragraphs (<= 1800 characters each,
 at most 8), so a secret cannot slip through split over two frames.
@@ -152,32 +170,39 @@ request. Anything not recognised is read-only.
 
 The service records the **offered** option text, not the game's spelling.
 
-## Execution-time re-checks (the last gate before an executor)
+## Execution-time re-checks and the start boundary
 
 Admission and confirm validate against the board and the policy, but an admitted request can wait in
-the four-thread worker pool, and the board is not locked by the control ledger. So the worker thread
-repeats the checks **immediately before the executor call**, after the lock check, and refuses
-(`status: refused`) on any mismatch:
+the four-thread worker pool, and the board is not locked by the control ledger. So every executor
+starts its command (or, in the dry run, records the call) **inside one execution-start boundary**: a
+mutex held from the last checks until `subprocess.Popen` has returned. Inside it the checks are
+repeated and the request is refused (`status: refused`) on any mismatch:
 
+- **Lock.** The terminal lock file and the in-memory latch (next section).
+- **Policy.** Work is judged by the policy in force now: it is refused when the policy was reloaded
+  since admission (any reload, even to identical content, bumps the revision: the player simply sends
+  the request again), and also when the actor, the capability or the board / profile / agent / service /
+  job it names is not allowed any more.
+- **Live availability.** The capabilities of the previous section are refused again here.
 - **Board.** The board is read again. `card.dispatch`: the card still exists, its revision equals the
   one in the confirmed prompt (title, body, status, assignee, priority, run and block are all part of
   it), its assignee is unchanged, and it is still dispatchable and not running. `decision.answer`: the
   decision is still open and is the **same** decision (same id and event), is classified exactly as at
   admission (kind, question, offered options) and the requested choice resolves to the same recorded
   answer; a question that turned into a permission is refused, and Approve on a permission is never
-  sent. `card.edit`: the card still exists and is not running (a comment is always allowed).
-- **Policy.** Work is judged by the policy in force now: it is refused when the policy was reloaded
-  since admission (any reload, even to identical content, bumps the revision: the player simply sends
-  the request again), and also when the actor, the capability or the board / profile / agent / service /
-  job it names is not allowed any more. The policy swap of a reload and this authorise-and-start step
-  are serialised by one lock, so a reload either completes before the check (the work is refused) or
-  after the work started (a started command cannot be revoked).
-- **Lock.** Checked before and after the two steps above, including the in-memory latch (next section).
+  sent. `card.edit`: the card still exists and is not running (a comment is always allowed). (On a
+  live service the first two never get here; these checks serve the dry run and a future conditional
+  backend.)
 
-**Residual window.** The `hermes` CLI has no conditional mutation (no "assign only if revision is X",
-no "unblock only decision N"), so the board is re-read and then the CLI is called; a change landing in
-those few milliseconds (the gap between this read and the CLI process reading the board) is not
-caught. If that is not acceptable, leave `card.dispatch` and `decision.answer` disabled.
+A policy swap (`SIGHUP`) takes the same mutex, and a game lock latches first and then waits for the
+mutex to drain; both wait in a helper thread, never blocking the event loop. So a reload or game lock
+is either entirely before the boundary (the request is refused) or entirely after the start.
+**Already started** means the boundary was passed: that command runs to its end and its outcome is
+recorded with the revision it was admitted under; a started command cannot be revoked. Nothing that has
+not passed the boundary can start after a reload or game lock has been handled. The terminal lock file
+is not under the mutex (it is a file); it is read inside the boundary, immediately before the spawn.
+An executor that returns without having passed the boundary is reported as `unknown` (tested for every
+executor class).
 
 ## Lock
 
@@ -277,4 +302,11 @@ was taken.
 signed test client; the real `hermes` is never called. `tests/test_control_security_fixes.py` holds the
 regression tests of the independent security review (execution-time re-checks, queued work vs reload,
 lock latch, complete audit writes, lock-state privacy, nonce boundary, handshake ordering, and the
-`--dev-offline-actors` gate).
+`--dev-offline-actors` gate). `tests/test_control_review_r1.py` holds those of the high-risk review
+(live refusal of the capabilities Hermes cannot run safely, with the reviewer's interleavings at the
+mutation boundary; the chat toolset allowlist; the execution-start boundary against reload and game
+lock, without blocking the event loop; game tags on every edited or created title; the executor /
+mode invariant). Most flow tests run a live service whose board and chat executors are TEST-ONLY
+subclasses that lift the live gate (`test_control_common.gate_lifted_executors`), so the argv and
+flow logic behind the gate stays tested; the gate itself is tested with exactly the executors the
+command line builds.

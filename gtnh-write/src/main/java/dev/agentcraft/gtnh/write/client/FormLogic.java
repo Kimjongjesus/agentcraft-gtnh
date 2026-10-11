@@ -74,6 +74,8 @@ public final class FormLogic {
         if (!b.equals(oldBody == null ? "" : oldBody.trim())) e.body = b;
         if (p != Integer.MIN_VALUE && p != oldPriority) e.priority = Integer.valueOf(p);
         if (e.title == null && e.body == null && e.priority == null) e.error = "Nothing changed.";
+        // the control service refuses a priority-only edit: edited text must carry the game tag (review r1 R5)
+        else if (e.title == null && e.body == null) e.error = "A priority change needs a title or details change with it.";
         return e;
     }
 

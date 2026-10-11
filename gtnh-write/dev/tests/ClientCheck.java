@@ -63,6 +63,8 @@ public class ClientCheck {
         Check.ok(e.error == null && "New".equals(e.title) && e.body == null && e.priority == null, "only the changed title is sent");
         e = FormLogic.edit("Old", "", 0, "Old", "more", "70");
         Check.ok(e.error == null && e.title == null && "more".equals(e.body) && e.priority != null && e.priority.intValue() == 70, "body and priority sent");
+        e = FormLogic.edit("Old", "old body", 5, "Old", "old body", "9");
+        Check.eq(e.error, "A priority change needs a title or details change with it.", "a priority-only edit is not sent (no text for the game tag)");
         e = FormLogic.edit("Old", "", 0, "  ", "", "");
         Check.ok(e.error != null, "empty title refused");
         e = FormLogic.edit("Old", "", 0, "x", "", "500");
